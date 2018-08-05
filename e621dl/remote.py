@@ -4,14 +4,34 @@ from time import sleep
 from timeit import default_timer
 from functools import lru_cache
 
-# External Imports
+# Personal Imports
+from e621dl import constants
+from e621dl import local
+
+# Vendor Imports
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
-# Personal Imports
-from . import constants
-from . import local
+def requests_retry_session(
+    retries = 5,
+    backoff_factor = 0.3,
+    status_forcelist = (500, 502, 504),
+    session = None,
+):
+    session = session or requests.Session()
+    retry = Retry(
+        total = retries,
+        read = retries,
+        connect = retries,
+        backoff_factor = backoff_factor,
+        status_forcelist = status_forcelist,
+        method_whitelist = frozenset(['GET', 'POST'])
+    )
+    adapter = HTTPAdapter(max_retries = retry)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
 
 def delayed_post(url, payload, session):
     # Take time before and after getting the requests response.
@@ -38,8 +58,8 @@ def get_posts(search_string, earliest_date, last_id, session):
     url = 'https://e621.net/post/index.json'
     payload = {
         'limit': constants.MAX_RESULTS,
-        'before_id': str(last_id),
-        'tags': 'date:>=' + str(earliest_date) + ' ' + search_string
+        'before_id': last_id,
+        'tags': f"date:>={earliest_date} {search_string}"
     }
 
     response = delayed_post(url, payload, session)
@@ -61,7 +81,7 @@ def get_tag_alias(user_tag, session):
     prefix = ''
 
     if ':' in user_tag:
-        print('[!] It is not possible to check if' + user_tag + ' is valid.')
+        print(f"[!] It is not possible to check if {user_tag} is valid.")
         return user_tag
 
     if user_tag[0] == '~':
@@ -81,13 +101,13 @@ def get_tag_alias(user_tag, session):
     results = response.json()
 
     if '*' in user_tag and results:
-        print('[✓] The tag ' + user_tag + ' is valid.')
+        print(f"[✓] The tag {user_tag} is valid.")
         return user_tag
 
     for tag in results:
         if user_tag == tag['name']:
-            print('[✓] The tag ' + prefix + user_tag + ' is valid.')
-            return prefix + user_tag
+            print(f"[✓] The tag {prefix}{user_tag} is valid.")
+            return f"{prefix}{user_tag}"
 
     url = 'https://e621.net/tag_alias/index.json'
     payload = {'approved': 'true', 'query': user_tag}
@@ -100,73 +120,53 @@ def get_tag_alias(user_tag, session):
     for tag in results:
         if user_tag == tag['name']:
             url = 'https://e621.net/tag/show.json'
-            payload = {'id': str(tag['alias_id'])}
+            payload = {'id': tag['alias_id']}
 
             response = delayed_post(url, payload, session)
             response.raise_for_status()
 
             results = response.json()
 
-            print('[✓] The tag ' + prefix + user_tag + ' was changed to ' + prefix + results['name'] + '.')
+            print(f"[✓] The tag {prefix}{user_tag} was changed to {prefix}{results['name']}.")
 
-            return prefix + results['name']
+            return f"{prefix}{results['name']}"
 
-    print('[!] The tag ' + prefix + user_tag + ' is spelled incorrectly or does not exist.')
-    raise SystemExit
+    print(f"[!] The tag {prefix}{user_tag} is spelled incorrectly or does not exist.")
+    return ''
 
 def download_post(url, path, session):
-    if '.' + constants.PARTIAL_DOWNLOAD_EXT not in path:
-        path += '.' + constants.PARTIAL_DOWNLOAD_EXT
+    if f".{constants.PARTIAL_DOWNLOAD_EXT}" not in path:
+        path += f".{constants.PARTIAL_DOWNLOAD_EXT}"
 
+    # Creates file if it does not exist so that os.path.getsize does not raise an exception.
     try:
         open(path, 'x')
     except FileExistsError:
         pass
 
-    header = {'Range': 'bytes=' + str(os.path.getsize(path)) + '-'}
+    header = {'Range': f"bytes={os.path.getsize(path)}-"}
     response = session.get(url, stream = True, headers = header)
     
-    if response.status_code in range(400,499+1):
-        print('[!] url ' + url + ' is not available, error code: ' +str(response.status_code))
+    if response.ok:    
+        with open(path, 'ab') as outfile:
+            for chunk in response.iter_content(chunk_size = 8192):
+                outfile.write(chunk)
+
+        os.rename(path, path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", ''))
+        return True
+
+    else:
         os.remove(path)
+        print(f"[!] The downoad URL {url} is not available. Error code: {response.status_code}.")
         return False
-    
-    response.raise_for_status()
-
-    with open(path, 'ab') as outfile:
-        for chunk in response.iter_content(chunk_size = 8192):
-            outfile.write(chunk)
-
-    os.rename(path, path.replace('.' + constants.PARTIAL_DOWNLOAD_EXT, ''))
-    return True
 
 def finish_partial_downloads(session):
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
             if file.endswith(constants.PARTIAL_DOWNLOAD_EXT):
-                print('[!] Partial download ' + file + ' found.')
+                print(f"[!] Partial download {file} found.")
 
                 path = os.path.join(root, file)
                 url = get_known_post(file.split('.')[0], session)['file_url']
 
                 download_post(url, path, session)
-
-def requests_retry_session(
-    retries=6,
-    backoff_factor=0.1,
-    status_forcelist=(500, 502, 504),
-    session=None,
-):
-    session = session or requests.Session()
-    retry = Retry(
-        total=retries,
-        read=retries,
-        connect=retries,
-        backoff_factor=backoff_factor,
-        status_forcelist=status_forcelist,
-        method_whitelist=frozenset(['GET', 'POST'])
-    )
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount('http://', adapter)
-    session.mount('https://', adapter)
-    return session

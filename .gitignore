@@ -2,24 +2,28 @@
 # WINDOWS
 ####################################
 
-# Recycle Bin
-$RECYCLE.BIN/
-
-# Windows thumbnail cache files
+# Thumbnail Cache
 Thumbs.db
 ehthumbs.db
 ehthumbs_vista.db
 
-# Config Files
-*.ini
+# Dump
+*.stackdump
 
-# Installer Files
+# Folder Config 
+[Dd]esktop.ini
+
+# Recycle Bin
+$RECYCLE.BIN/
+
+# Installers
 *.cab
 *.msi
+*.msix
 *.msm
 *.msp
 
-# Windows Shortcuts
+# Shortcuts
 *.lnk
 
 ####################################
@@ -27,19 +31,19 @@ ehthumbs_vista.db
 ####################################
 
 # User Files
-\.vscode/
-.history
+.vscode/
 
 ####################################
 # PYTHON
 ####################################
 
-# Compiled Python
+# Compiled
 __pycache__/
 *.pyc
 
-# Pyinstaller
+# PyInstaller
 *.ico
+*.manifest
 *.spec
 build/
 dist/
@@ -51,3 +55,4 @@ dist/
 # Repo Specific
 downloads/
 build.bat
+config.ini

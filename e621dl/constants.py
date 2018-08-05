@@ -1,20 +1,11 @@
-VERSION = '4.5.0'
-VERSION_NOTE = 'Forked from 2.4.6'
+VERSION = '4.5.1'
 
-LOGGER_FORMAT = '%(name)-11s %(levelname)-8s %(message)s'
-DATE_FORMAT = '%Y-%m-%d'
-
-USER_AGENT = 'e621dl (Wulfre) -- Version ' + VERSION
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
 
 DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;; GENERAL  ;;
 ;;;;;;;;;;;;;;
-
-[Other]
-include_md5 = false
-make_hardlinks = false
 
 [Defaults]
 days = 1
@@ -24,6 +15,10 @@ min_favs = 0
 
 [Blacklist]
 tags =
+
+[Other]
+include_md5 = false
+make_hardlinks = false
 
 ;;;;;;;;;;;;;;;;;;;
 ;; SEARCH GROUPS ;;
