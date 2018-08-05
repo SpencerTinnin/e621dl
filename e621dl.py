@@ -45,7 +45,8 @@ if __name__ == '__main__':
         default_score = -0x7FFFFFFF # Allow posts of any score to be downloaded.
         default_favs = 0
         default_ratings = ['s'] # Allow only safe posts to be downloaded.
-
+        duplicate_func = copy
+        
         # Iterate through all sections (lines enclosed in brackets: []).
         for section in config.sections():
 
@@ -55,6 +56,9 @@ if __name__ == '__main__':
                     if option.lower() == 'include_md5':
                         if value.lower() == 'true':
                             include_md5 = True
+                    elif option.lower() == 'make_hardlinks':
+                        if value.lower() == 'true':
+                            duplicate_func = os.link
 
             # Get values from the "Defaults" section. This overwrites the initialized default_* variables.
             elif section.lower() == 'defaults':
@@ -183,7 +187,7 @@ if __name__ == '__main__':
                         in_storage += 1
                     elif filename in files:
                         print('[✗] Post {} was already downloaded to another folder'.format( str(post['id']) ))
-                        copy(files[filename],path)
+                        duplicate_func(files[filename], path)
                         in_storage += 1
                         
                     elif post['rating'] not in ratings:

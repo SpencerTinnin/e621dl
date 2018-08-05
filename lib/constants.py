@@ -14,6 +14,7 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 
 [Other]
 include_md5 = false
+make_hardlinks = false
 
 [Defaults]
 days = 1
