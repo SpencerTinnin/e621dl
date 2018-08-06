@@ -150,7 +150,7 @@ if __name__ == '__main__':
                     elif post['rating'] not in search['ratings']:
                         print(f"[✗] Post {post['id']} was skipped for missing a requested rating.")
                     elif filename in files:
-                        print('[✗] Post {} was already downloaded to another folder'.format( str(post['id']) ))
+                        print(f"[✗] Post {str(post['id'])} was already downloaded to another folder")
                         duplicate_func(files[filename], path)
                     # Using fnmatch allows for wildcards to be properly filtered.
                     elif [x for x in post['tags'].split() if any(fnmatch(x, y) for y in blacklist)]:
@@ -162,11 +162,10 @@ if __name__ == '__main__':
                     elif int(post['fav_count']) < search['min_favs']:
                         print(f"[✗] Post {post['id']} was skipped for having a low favorite count.")
                     else:
-                        if remote.download_post(post['file_url'], path, session):
-                            downloaded += 1
-                            files[filename]=path
                         print(f"[✓] Post {post['id']} is being downloaded.")
-                        remote.download_post(post['file_url'], path, session)
+                        if remote.download_post(post['file_url'], path, session):
+                            files[filename]=path
+                        
 
                 # Break while loop. End program.
                 if last_id == 0:
