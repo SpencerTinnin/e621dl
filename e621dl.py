@@ -5,7 +5,8 @@
 import os
 from distutils.version import StrictVersion
 from fnmatch import fnmatch
-from shutil import copy
+from os import symlink
+from os.path import abspath
 
 # Personal Imports
 from e621dl import constants
@@ -46,7 +47,7 @@ if __name__ == '__main__':
         default_score = -0x7F_FF_FF_FF # Allow posts of any score to be downloaded.
         default_favs = 0
         default_ratings = ['s'] # Allow only safe posts to be downloaded.
-        duplicate_func = copy
+        duplicate_func = symlink
         
         # Iterate through all sections (lines enclosed in brackets: []).
         for section in config.sections():
@@ -151,7 +152,7 @@ if __name__ == '__main__':
                         print(f"[✗] Post {post['id']} was skipped for missing a requested rating.")
                     elif filename in files:
                         print(f"[✗] Post {str(post['id'])} was already downloaded to another folder")
-                        duplicate_func(files[filename], path)
+                        duplicate_func(abspath(files[filename]), abspath(path))
                     # Using fnmatch allows for wildcards to be properly filtered.
                     elif [x for x in post['tags'].split() if any(fnmatch(x, y) for y in blacklist)]:
                         print(f"[✗] Post {post['id']} was skipped for having a blacklisted tag.")
