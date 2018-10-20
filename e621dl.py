@@ -6,8 +6,7 @@ import os
 from distutils.version import StrictVersion
 from fnmatch import fnmatch
 from shutil import copy
-from os import symlink
-from os.path import abspath
+from os import link
 
 # Personal Imports
 from e621dl import constants
@@ -49,7 +48,7 @@ if __name__ == '__main__':
         default_favs = 0
         default_ratings = ['s'] # Allow only safe posts to be downloaded.
         dup_copy_func = copy
-        dup_syml_func = symlink
+        dup_syml_func = link
         
         # Iterate through all sections (lines enclosed in brackets: []).
         for section in config.sections():
@@ -155,7 +154,7 @@ if __name__ == '__main__':
                     elif filename in files:
                         print(f"[✗] Post {str(post['id'])} was already downloaded to another folder")
                         try:
-                            dup_syml_func(abspath(files[filename]), abspath(path))
+                            dup_syml_func(files[filename], path)
                         except:
                             dup_copy_func(files[filename], path)
                     # Using fnmatch allows for wildcards to be properly filtered.
