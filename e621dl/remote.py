@@ -1,6 +1,7 @@
 # Internal Imports
 import os
 from time import sleep
+from datetime import datetime
 from timeit import default_timer
 from functools import lru_cache
 
@@ -12,6 +13,20 @@ from e621dl import local
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+
+class Post:
+    __slots__=['id','tags','rating','id','md5','file_ext','file_url','score','fav_count','days_ago']
+    def __init__(self, attrs):
+        attrs['days_ago']=(datetime.now()-datetime.fromtimestamp(attrs['created_at']['s'])).days
+        for key, value in attrs.items():
+            if key in self.__slots__:
+                setattr(self, key, value)
+    
+def make_posts_list(json_list):
+    post_list=[]
+    for post in json_list:
+        post_list.append(Post(post))
+    return post_list
 
 def requests_retry_session(
     retries = 5,
@@ -65,7 +80,7 @@ def get_posts(search_string, earliest_date, last_id, session):
     response = delayed_post(url, payload, session)
     response.raise_for_status()
 
-    return response.json()
+    return make_posts_list(response.json())
 
 def get_known_post(post_id, session):
     url = 'https://e621.net/post/show.json'
@@ -87,10 +102,12 @@ def get_tag_alias(user_tag, session):
     if user_tag[0] == '~':
         prefix = '~'
         user_tag = user_tag[1:]
+        return prefix+get_tag_alias(user_tag, session)
 
     if user_tag[0] == '-':
         prefix = '-'
         user_tag = user_tag[1:]
+        return prefix+get_tag_alias(user_tag, session)
 
     url = 'https://e621.net/tag/index.json'
     payload = {'name': user_tag}
@@ -101,12 +118,12 @@ def get_tag_alias(user_tag, session):
     results = response.json()
 
     if '*' in user_tag and results:
-        print(f"[✓] The tag {user_tag} is valid.")
+        print(f"[+] The tag {user_tag} is valid.")
         return user_tag
 
     for tag in results:
         if user_tag == tag['name']:
-            print(f"[✓] The tag {prefix}{user_tag} is valid.")
+            print(f"[+] The tag {prefix}{user_tag} is valid.")
             return f"{prefix}{user_tag}"
 
     url = 'https://e621.net/tag_alias/index.json'
@@ -127,14 +144,15 @@ def get_tag_alias(user_tag, session):
 
             results = response.json()
 
-            print(f"[✓] The tag {prefix}{user_tag} was changed to {prefix}{results['name']}.")
+            print(f"[+] The tag {prefix}{user_tag} was changed to {prefix}{results['name']}.")
 
             return f"{prefix}{results['name']}"
 
     print(f"[!] The tag {prefix}{user_tag} is spelled incorrectly or does not exist.")
+    raise SystemExit
     return ''
 
-def download_post(url, path, session):
+def download_post(url, path, session, cachefunc, duplicate_func):
     if f".{constants.PARTIAL_DOWNLOAD_EXT}" not in path:
         path += f".{constants.PARTIAL_DOWNLOAD_EXT}"
 
@@ -152,7 +170,10 @@ def download_post(url, path, session):
             for chunk in response.iter_content(chunk_size = 8192):
                 outfile.write(chunk)
 
-        os.rename(path, path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", ''))
+        newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
+        os.rename(path, newpath)
+        if cachefunc:
+            duplicate_func(newpath, f"cache/{os.path.basename(newpath)}")
         return True
 
     else:
@@ -160,7 +181,7 @@ def download_post(url, path, session):
         print(f"[!] The downoad URL {url} is not available. Error code: {response.status_code}.")
         return False
 
-def finish_partial_downloads(session):
+def finish_partial_downloads(session, cachefunc, duplicate_func):
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
             if file.endswith(constants.PARTIAL_DOWNLOAD_EXT):
@@ -169,4 +190,4 @@ def finish_partial_downloads(session):
                 path = os.path.join(root, file)
                 url = get_known_post(file.split('.')[0], session)['file_url']
 
-                download_post(url, path, session)
+                download_post(url, path, session, cachefunc, duplicate_func)
