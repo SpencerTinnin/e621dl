@@ -189,7 +189,7 @@ def main():
 
                 # Append the final values that will be used for the specific section to the list of searches.
                 # Note section_tags is a list within a list.
-                searches.append({'directory': section, 'tags': section_tags, 'ratings': section_ratings, 'min_score': section_score, 'min_favs': section_favs, 'earliest_date': section_date, 'days_ago': section_days_ago, 'section_blacklist': section_blacklist, 'section_whitelist': section_whitelist, 'section_cond_func': section_cond_func, 'section_anylist': section_anylist})
+                searches.append({'directory': section.strip(), 'tags': section_tags, 'ratings': section_ratings, 'min_score': section_score, 'min_favs': section_favs, 'earliest_date': section_date, 'days_ago': section_days_ago, 'section_blacklist': section_blacklist, 'section_whitelist': section_whitelist, 'section_cond_func': section_cond_func, 'section_anylist': section_anylist})
 
                 
                 
