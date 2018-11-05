@@ -39,7 +39,7 @@ def prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func
         for post in results:
             tags = post.tags.split()
             
-            if local_whitelist and not any(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
+            if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
                 print(f"[-] Post {post.id} was skipped for missing a requested tag.")
             # Using fnmatch allows for wildcards to be properly filtered.
             elif local_blacklist and[x for x in tags if any(fnmatch(x, y) for y in local_blacklist)]:
@@ -250,7 +250,7 @@ def main():
                 for post in results:
                     tags = post.tags.split()
                     #if all tag mask in whitelist have at least one match in tags
-                    if local_whitelist and not any(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
+                    if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
                         print(f"[-] Post {post.id} was skipped for missing a requested tag.")
                         pass
                     elif post.rating not in search['ratings']:
