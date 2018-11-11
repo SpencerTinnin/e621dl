@@ -4,6 +4,8 @@ from time import sleep
 from datetime import datetime
 from timeit import default_timer
 from functools import lru_cache
+import sqlite3
+import pickle
 
 # Personal Imports
 from e621dl import constants
@@ -21,7 +23,7 @@ class Post:
         for key, value in attrs.items():
             if key in self.__slots__:
                 setattr(self, key, value)
-    
+
 def make_posts_list(json_list):
     post_list=[]
     for post in json_list:
@@ -70,6 +72,7 @@ def get_github_release(session):
     return response.json()['tag_name'].strip('v')
 
 def get_posts(search_string, earliest_date, last_id, session):
+    #raise NotImplementedError('not now')
     url = 'https://e621.net/post/index.json'
     payload = {
         'limit': constants.MAX_RESULTS,
@@ -77,10 +80,19 @@ def get_posts(search_string, earliest_date, last_id, session):
         'tags': f"date:>={earliest_date} {search_string}"
     }
 
-    response = delayed_post(url, payload, session)
-    response.raise_for_status()
+    while True:
+        response = delayed_post(url, payload, session)
+        response.raise_for_status()
 
-    return make_posts_list(response.json())
+        results=make_posts_list(response.json())
+        yield results
+        
+        if len(results) < constants.MAX_RESULTS:
+            break
+        else:
+            last_id = results[-1].id
+            payload['before_id']   = last_id
+            
 
 def get_known_post(post_id, session):
     url = 'https://e621.net/post/show.json'

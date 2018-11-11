@@ -2,12 +2,161 @@
 import configparser
 import datetime
 import os
+import atexit
+from threading import Lock
+from collections import deque
+import sqlite3
+import pickle
+from time import sleep
 
 #concurrent.futures.Executor
 #this is gonna be awesome
 
 # Personal Imports
 from e621dl import constants
+
+class DownloadQueue:
+    def __init__(self):
+        self._lock = Lock()
+        
+        try:
+            self.load()
+        except:
+            self.reset()
+
+    def popleft(self):
+        with self._lock:
+            return self._deque.popleft()
+
+    def append(self, arg, maxlen=10):
+        while True:
+            with self._lock:
+                if len(self._deque) < maxlen:
+                    break
+            sleep(0.01)
+        
+        with self._lock:
+            return self._deque.append(arg)
+    
+    def save(self):
+        with self._lock:
+            with open('download_queue.pickle', 'wb') as download_queue_file:
+                pickle.dump((self.last_id, self.completed, self._deque), download_queue_file, protocol=pickle.HIGHEST_PROTOCOL)
+                
+    def load(self):
+        with self._lock:
+            with open('download_queue.pickle', 'rb') as download_queue_file:
+                self.last_id, self.completed, self._deque = pickle.load(download_queue_file)
+    
+    def last(self):
+        with self._lock:
+            return self._deque[-1]
+
+    def first(self):
+        with self._lock:
+            return self._deque[0]
+    
+    def reset(self):
+        self._deque=deque()
+        self.completed=False
+        self.last_id = 0x7F_FF_FF_FF
+
+class PostsStorage:
+    def __init__(self):
+        self.conn = sqlite3.connect('posts.db')
+        self.cur = self.conn.cursor()
+        self.cur.executescript(
+            '''CREATE TABLE IF NOT EXISTS posts (
+                id     INTEGER PRIMARY KEY
+                               UNIQUE
+                               NOT NULL,
+                struct BLOB
+            ) WITHOUT ROWID;
+            
+            CREATE VIEW IF NOT EXISTS posts_only AS 
+               SELECT struct FROM posts ORDER BY id DESC;''')
+        self.conn.commit()          
+    
+    def append(self, posts):
+        self.cur.executemany('INSERT OR REPLACE INTO posts VALUES (?,?)',
+            ( (post.id, pickle.dumps(post, protocol = pickle.HIGHEST_PROTOCOL) ) for post in posts) )
+        self.conn.commit()
+        
+    def __iter__(self):
+        self.cur.execute('SELECT * FROM posts_only')
+        return self
+        
+    def __next__(self):
+        posts=[]
+        try:
+            for i in range(320):
+                posts.append(pickle.loads(next(self.cur)[0]))
+        except StopIteration:
+            pass
+            
+        if posts:
+            return posts
+        else:
+            raise StopIteration
+        
+    def close(self):
+        self.conn.close()
+
+_handler_gc_protection = [] #in case of lambdas
+
+#On Ctrl-C, Ctrl-Z or window close in Windows
+#or terminal close, Ctrl-C or kill in posix
+#we will execute close_handler
+#and than immediately we will exit from python
+#if no signals recieved, close_handler
+#will be executed on normal exit
+#or on interrupt
+def save_on_exit_events(close_handler):
+    del _handler_gc_protection[:]
+        
+    try: #posix
+        from signal import signal, SIGHUP, SIGINT, SIGTERM
+        SIGNAMES={ i:str(i) for i in (SIGHUP, SIGINT, SIGTERM) }
+
+        def nixhandler(signum, frame):
+            try:
+                close_handler()
+            finally:
+                os._exit(0)
+
+        for i in SIGNAMES:
+            signal(i, nixhandler)
+            
+        _handler_gc_protection.append(nixhandler)
+            
+    except ImportError: #win. CTRL_CLOSE_EVENT not working with standart signal handling
+        from ctypes import windll, WINFUNCTYPE, CFUNCTYPE
+        from ctypes.wintypes import DWORD, BOOL
+        
+        HANDLER_TYPE=WINFUNCTYPE(BOOL, DWORD)
+        
+        SetConsoleCtrlHandler = windll.kernel32.SetConsoleCtrlHandler
+        SetConsoleCtrlHandler.reltype = BOOL
+        SetConsoleCtrlHandler.argtypes = ( HANDLER_TYPE, BOOL )
+        
+        CTRL_C_EVENT = 0
+        CTRL_BREAK_EVENT = 1
+        CTRL_CLOSE_EVENT = 2
+
+        SIGNAMES = { CTRL_C_EVENT:'CTRL_C_EVENT', CTRL_BREAK_EVENT:'CTRL_BREAK_EVENT', CTRL_CLOSE_EVENT:'CTRL_CLOSE_EVENT'}
+        
+        @HANDLER_TYPE
+        def winhandler(sig):
+            try:
+                close_handler()
+            finally:
+                os._exit(0)
+        
+        SetConsoleCtrlHandler(winhandler, 1)
+        _handler_gc_protection.append(winhandler)
+        
+    _handler_gc_protection.append(close_handler)
+    atexit.register(close_handler)
 
 def _check(tag, tags):
     return tag in tags
@@ -20,6 +169,19 @@ def make_check_funk(source_template, tags):
     exec(func_str,{'check':_check},loc)
     return loc['f']
 
+def get_posts(search_string, earliest_date, last_id, session):
+    url = 'https://e621.net/post/index.json'
+    payload = {
+        'limit': constants.MAX_RESULTS,
+        'before_id': last_id,
+        'tags': f"date:>={earliest_date} {search_string}"
+    }
+
+    response = delayed_post(url, payload, session)
+    response.raise_for_status()
+
+    return make_posts_list(response.json())
+    
 FORBIDDEN_TAG_CHARS=r'%,#*'
 def tags_and_source_template(line):
     

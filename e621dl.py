@@ -7,58 +7,72 @@ import pickle
 from distutils.version import StrictVersion
 from fnmatch import fnmatch
 from shutil import copy
+from collections import deque
+from threading import Thread, Lock
+from time import sleep
 
 # Personal Imports
 from e621dl import constants
 from e621dl import local
 from e621dl import remote
+                
+download_queue = local.DownloadQueue()
+
+dprint=print
+def print(*args,**kwargs): return None
 
 def prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func):
-    if not prefilter:
-        return []
-        
-    print('')
-    print("[i] Doing prefiltering...")
+    def print(*args, **kwargs):
+        pass
     
-    last_id = 0x7F_FF_FF_FF
-    pre_results = []
-    
-    search_string = ' '.join(prefilter[:5])
-    local_blacklist = set(blacklist + [tag[1:] for tag in prefilter if tag[0]=='-'])
-    local_anylist   = {tag[1:] for tag in prefilter if tag[0]=='~'}
-    local_whitelist = {tag for tag in prefilter if tag[0] not in ('-','~')}
-    
-    while True:
+    storage = local.PostsStorage()
+    try:
+        if not prefilter:
+            return []
+           
+        print('')
+        print("[i] Doing prefiltering...")
 
-        results = remote.get_posts(search_string, local.get_date(max_days_ago), last_id, session)
+        if download_queue.completed:
+            return
         
-        # Gets the id of the last post found in the search so that the search can continue.
-        # If the number of results is less than the max, the next searches will always return 0 results.
-        # Because of this, the last id is set to 0 which is the base case for exiting the while loop.
+        last_id = download_queue.last_id
+        
+        search_string = ' '.join(prefilter[:5])
+        local_blacklist = set(blacklist + [tag[1:] for tag in prefilter if tag[0]=='-'])
+        local_anylist   = {tag[1:] for tag in prefilter if tag[0]=='~'}
+        local_whitelist = {tag for tag in prefilter if tag[0] not in ('-','~')}
+        
+        for results in remote.get_posts(search_string, local.get_date(max_days_ago), last_id, session):
+        #for results in storage:
+            storage.append(results)
+            filtered_results=[]
+            # Gets the id of the last post found in the search so that the search can continue.
+            # If the number of results is less than the max, the next searches will always return 0 results.
+            # Because of this, the last id is set to 0 which is the base case for exiting the while loop.
 
-        for post in results:
-            tags = post.tags.split()
-            
-            if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
-                print(f"[-] Post {post.id} was skipped for missing a requested tag.")
-            # Using fnmatch allows for wildcards to be properly filtered.
-            elif local_blacklist and[x for x in tags if any(fnmatch(x, y) for y in local_blacklist)]:
-                print(f"[-] Post {post.id} was skipped for having a blacklisted tag.")
-                pass
-            elif local_anylist and not [x for x in tags if any(fnmatch(x, y) for y in local_anylist)]:
-                print(f"[-] Post {post.id} was skipped for missing any of optional tag.")
-            elif not cond_func(tags):
-                print(f"[-] Post {post.id} was skipped for failing condition")
-                pass
-            else:
-                print(f"[+] Post {post.id} passed global filtering.")
-                pre_results.append(post)
-        if len(results) < constants.MAX_RESULTS:
-            break
-        else:
+            for post in results:
+                tags = post.tags.split()
+                
+                if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
+                    print(f"[-] Post {post.id} was skipped for missing a requested tag.")
+                # Using fnmatch allows for wildcards to be properly filtered.
+                elif local_blacklist and[x for x in tags if any(fnmatch(x, y) for y in local_blacklist)]:
+                    print(f"[-] Post {post.id} was skipped for having a blacklisted tag.")
+                    pass
+                elif local_anylist and not [x for x in tags if any(fnmatch(x, y) for y in local_anylist)]:
+                    print(f"[-] Post {post.id} was skipped for missing any of optional tag.")
+                elif not cond_func(tags):
+                    print(f"[-] Post {post.id} was skipped for failing condition")
+                    pass
+                else:
+                    print(f"[+] Post {post.id} passed global filtering.")
+                    filtered_results.append(post)
+            download_queue.append(filtered_results)        
             last_id = results[-1].id
-            
-    return pre_results
+            download_queue.last_id=last_id
+    finally:
+        download_queue.completed = True
           
 def main():
     # Create the requests session that will be used throughout the run.
@@ -203,109 +217,114 @@ def main():
         files = local.get_files_dict(cachefunc)
 
         #----------HAAAAAAAAAAAAAAAAAX ---------
-        if os.path.exists('pre_results.pickle'):
-            with open('pre_results.pickle','rb') as pre_results_file:
-                pre_results=pickle.load(pre_results_file)
-        else:
-            pre_results=prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func)
-
-        if pre_results:
-            with open('pre_results.pickle','wb') as pre_results_file:
-                pickle.dump(pre_results, pre_results_file)
-        
+        print("[DEBUG] before_id is", download_queue.last_id)
+        local.save_on_exit_events(download_queue.save) #here, because we do not download anything before this point
+        #input()
+        queue_thread=Thread(target=prefilter_build_index, args=(session, prefilter, max_days_ago, blacklist, cond_func))
+        queue_thread.start()
+        #prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func)
         #----------HAAAAAAAAAAAAAAAAAX end -----
         
-        for search in searches:
-            print('')
-
-            # Creates the string to be sent to the API.
-            # Currently only 5 items can be sent directly so the rest are discarded to be filtered out later.
-            if len(search['tags']) > 5:
-                search_string = ' '.join(search['tags'][:5])
-            else:
-                search_string = ' '.join(search['tags'])
-
-            # Initializes last_id (the last post found in a search) to an enormous number so that the newest post will be found.
-            # This number is hard-coded because on 64-bit archs, sys.maxsize() will return a number too big for e621 to use.
-            last_id = 0x7F_FF_FF_FF
-            
-            # making for filtering out <-tagname>s from prefilter
-            # and if there are <-tagname> in fourth or more position in config
-            local_blacklist=set(blacklist+search['section_blacklist'])
-            local_whitelist=set(search['section_whitelist'])
-            local_anylist = set(search['section_anylist'])
-            # Sets up a loop that will continue indefinitely until the last post of a search has been found.
-            while True:
-                print("[i] Getting posts...")
-                results = pre_results if pre_results else remote.get_posts(search_string, search['earliest_date'], last_id, session)
-
-                # Gets the id of the last post found in the search so that the search can continue.
-                # If the number of results is less than the max, the next searches will always return 0 results.
-                # Because of this, the last id is set to 0 which is the base case for exiting the while loop.
-                if len(results) < constants.MAX_RESULTS:
-                    last_id = 0
-                else:
-                    last_id = results[-1].id
-                    
-                for post in results:
-                    tags = post.tags.split()
-                    #if all tag mask in whitelist have at least one match in tags
-                    if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
-                        print(f"[-] Post {post.id} was skipped for missing a requested tag.")
-                        pass
-                    elif post.rating not in search['ratings']:
-                        #print(f"[-] Post {post.id} was skipped for missing a requested rating.")
-                        pass
-                    # Using fnmatch allows for wildcards to be properly filtered.
-                    # if at least one tag is in local_blacklist
-                    elif local_blacklist and [x for x in tags if any(fnmatch(x, y) for y in local_blacklist)]:
-                        #print(f"[-] Post {post.id} was skipped for having a blacklisted tag.")
-                        pass
-                    # if not even one tag in local_anylist
-                    elif local_anylist and not [x for x in tags if any(fnmatch(x, y) for y in local_anylist)]:
-                        print(f"[-] Post {post.id} was skipped for missing any of optional tag.")
-                    elif int(post.score) < search['min_score']:
-                        #print(f"[-] Post {post.id} was skipped for having a low score.")
-                        pass
-                    elif int(post.fav_count) < search['min_favs']:
-                        #print(f"[-] Post {post.id} was skipped for having a low favorite count.")
-                        pass
-                    elif not search['section_cond_func'](tags):
-                        #print(f"[-] Post {post.id} was skipped for failing condition.")
-                        pass
-                    elif post.days_ago >= search['days_ago']:
-                        print(f"[-] Post {post.id} was skipped for being too old")
-                    else:
-                        #it turns out make_path is a great resource hog. So we will call it only when we need it
-                        if include_md5:
-                            filename='{}.{}.{}'.format(post.id,post.md5,post.file_ext)
-                            path = local.make_path(search['directory'], f"{post.id}.{post.md5}", post.file_ext)
-                        else:
-                            filename='{}.{}'.format(post.id,post.file_ext)
-                            path = local.make_path(search['directory'], post.id, post.file_ext)
-                        
-                        if os.path.isfile(path):
-                            print(f"[-] Post {post.id} was already downloaded.")
-
-                        elif filename in files:
-                            print(f"[-] Post {post.id} was already downloaded to another folder")
-                            duplicate_func(files[filename], path)
-                        else:
-                            print(f"[+] Post {post.id} is being downloaded.")
-                            if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
-                                files[filename]=path
-                        
-
-                # Break while loop. End program.
-                if last_id == 0 or pre_results:
+        while True:
+            try:
+                chunk = download_queue.first()
+            except:
+                if download_queue.completed:
                     break
+                else:
+                    sleep(0.5)
+                    continue
+            for search in searches:
+                print('')
 
-    # End program.
+                # Creates the string to be sent to the API.
+                # Currently only 5 items can be sent directly so the rest are discarded to be filtered out later.
+                if len(search['tags']) > 5:
+                    search_string = ' '.join(search['tags'][:5])
+                else:
+                    search_string = ' '.join(search['tags'])
+
+                # Initializes last_id (the last post found in a search) to an enormous number so that the newest post will be found.
+                # This number is hard-coded because on 64-bit archs, sys.maxsize() will return a number too big for e621 to use.
+                last_id = 0x7F_FF_FF_FF
+                
+                # making for filtering out <-tagname>s from prefilter
+                # and if there are <-tagname> in fourth or more position in config
+                local_blacklist=set(blacklist+search['section_blacklist'])
+                local_whitelist=set(search['section_whitelist'])
+                local_anylist = set(search['section_anylist'])
+                # Sets up a loop that will continue indefinitely until the last post of a search has been found.
+                while True:
+                    print("[i] Getting posts...")
+                    results = chunk if chunk else remote.get_posts(search_string, search['earliest_date'], last_id, session)
+
+                    # Gets the id of the last post found in the search so that the search can continue.
+                    # If the number of results is less than the max, the next searches will always return 0 results.
+                    # Because of this, the last id is set to 0 which is the base case for exiting the while loop.
+                    if len(results) < constants.MAX_RESULTS:
+                        last_id = 0
+                    else:
+                        last_id = results[-1].id
+                        
+                    for post in results:
+                        tags = post.tags.split()
+                        #if not all tag mask in whitelist have at least one match in tags skip post
+                        if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
+                            print(f"[-] Post {post.id} was skipped for missing a requested tag.")
+                            pass
+                        elif post.rating not in search['ratings']:
+                            #print(f"[-] Post {post.id} was skipped for missing a requested rating.")
+                            pass
+                        # Using fnmatch allows for wildcards to be properly filtered.
+                        # if at least one tag is in local_blacklist
+                        elif local_blacklist and [x for x in tags if any(fnmatch(x, y) for y in local_blacklist)]:
+                            #print(f"[-] Post {post.id} was skipped for having a blacklisted tag.")
+                            pass
+                        # if not even one tag in local_anylist
+                        elif local_anylist and not [x for x in tags if any(fnmatch(x, y) for y in local_anylist)]:
+                            print(f"[-] Post {post.id} was skipped for missing any of optional tag.")
+                        elif int(post.score) < search['min_score']:
+                            #print(f"[-] Post {post.id} was skipped for having a low score.")
+                            pass
+                        elif int(post.fav_count) < search['min_favs']:
+                            #print(f"[-] Post {post.id} was skipped for having a low favorite count.")
+                            pass
+                        elif not search['section_cond_func'](tags):
+                            #print(f"[-] Post {post.id} was skipped for failing condition.")
+                            pass
+                        elif post.days_ago >= search['days_ago']:
+                            print(f"[-] Post {post.id} was skipped for being too old")
+                        else:
+                            #it turns out make_path is a great resource hog. So we will call it only when we need it
+                            if include_md5:
+                                filename='{}.{}.{}'.format(post.id,post.md5,post.file_ext)
+                                path = local.make_path(search['directory'], f"{post.id}.{post.md5}", post.file_ext)
+                            else:
+                                filename='{}.{}'.format(post.id,post.file_ext)
+                                path = local.make_path(search['directory'], post.id, post.file_ext)
+                            
+                            if os.path.isfile(path):
+                                print(f"[-] Post {post.id} was already downloaded.")
+
+                            elif filename in files:
+                                print(f"[-] Post {post.id} was already downloaded to another folder")
+                                duplicate_func(files[filename], path)
+                            else:
+                                print(f"[+] Post {post.id} is being downloaded.")
+                                if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
+                                    files[filename]=path
+                            
+
+                    # Break while loop. End program.
+                    if last_id == 0 or chunk:
+                        break
+
+            download_queue.popleft()
+        # End program.
     
     
     #----------HAAAAAAAAAAAAAAAAAX ---------
-    if os.path.exists('pre_results.pickle'):
-        os.rename('pre_results.pickle', 'pre_results.pickle.bak')
+    download_queue.reset()
     
     #----------HAAAAAAAAAAAAAAAAAX end -----
     
