@@ -8,6 +8,7 @@ from collections import deque
 import sqlite3
 import pickle
 from time import sleep
+from functools import lru_cache
 
 #concurrent.futures.Executor
 #this is gonna be awesome
@@ -33,7 +34,7 @@ class DownloadQueue:
             with self._lock:
                 if len(self._deque) < maxlen:
                     break
-            sleep(0.01)
+            sleep(0.0001)
         
         with self._lock:
             return self._deque.append(arg)
@@ -261,12 +262,18 @@ def substitute_illegals(char):
     illegals = ['\\', ':', '*', '?', '\"', '<', '>', '|', '/']
     return '_' if char in illegals else char
 
-def make_path(dir_name, filename, ext):
+@lru_cache(maxsize=512, typed=False)
+def make_new_dir(dir_name):
     clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower()
-
     os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
+    return clean_dir_name
+    
+def make_path(dir_name, filename, ext):
+    #clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower()
 
-    return f"downloads/{clean_dir_name}/{filename}.{ext}"
+    #os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
+    
+    return f"downloads/{make_new_dir(dir_name)}/{filename}.{ext}"
 
 def make_cache_folder():
     try:

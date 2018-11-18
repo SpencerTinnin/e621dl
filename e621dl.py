@@ -4,6 +4,7 @@
 # Internal Imports
 import os
 import pickle
+import re
 from distutils.version import StrictVersion
 from fnmatch import fnmatch
 from shutil import copy
@@ -19,8 +20,9 @@ from e621dl import remote
 download_queue = local.DownloadQueue()
 
 dprint=print
-def print(*args,**kwargs): return None
+#def print(*args,**kwargs): return None
 
+#@profile
 def prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func):
     def print(*args, **kwargs):
         pass
@@ -42,6 +44,8 @@ def prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func
         local_blacklist = set(blacklist + [tag[1:] for tag in prefilter if tag[0]=='-'])
         local_anylist   = {tag[1:] for tag in prefilter if tag[0]=='~'}
         local_whitelist = {tag for tag in prefilter if tag[0] not in ('-','~')}
+        local_whitelist={re.compile(re.escape(mask).replace('\\*','.*')) for mask in local_whitelist}
+        local_blacklist={re.compile(re.escape(mask).replace('\\*','.*')) for mask in local_blacklist}
         
         for results in remote.get_posts(search_string, local.get_date(max_days_ago), last_id, session):
         #for results in storage:
@@ -54,11 +58,13 @@ def prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func
             for post in results:
                 tags = post.tags.split()
                 
-                if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
-                    print(f"[-] Post {post.id} was skipped for missing a requested tag.")
+                #if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
+                if local_whitelist and not all( any(reg.fullmatch(tag) for tag in tags) for reg in local_whitelist ):
+                    #print(f"[-] Post {post.id} was skipped for missing a requested tag.")
+                    pass
                 # Using fnmatch allows for wildcards to be properly filtered.
-                elif local_blacklist and[x for x in tags if any(fnmatch(x, y) for y in local_blacklist)]:
-                    print(f"[-] Post {post.id} was skipped for having a blacklisted tag.")
+                elif local_blacklist and any( any(reg.fullmatch(tag) for tag in tags) for reg in local_blacklist ):
+                    #print(f"[-] Post {post.id} was skipped for having a blacklisted tag.")
                     pass
                 elif local_anylist and not [x for x in tags if any(fnmatch(x, y) for y in local_anylist)]:
                     print(f"[-] Post {post.id} was skipped for missing any of optional tag.")
@@ -74,6 +80,7 @@ def prefilter_build_index(session, prefilter, max_days_ago, blacklist, cond_func
     finally:
         download_queue.completed = True
           
+#@profile
 def main():
     # Create the requests session that will be used throughout the run.
     with remote.requests_retry_session() as session:
@@ -250,8 +257,8 @@ def main():
                 
                 # making for filtering out <-tagname>s from prefilter
                 # and if there are <-tagname> in fourth or more position in config
-                local_blacklist=set(blacklist+search['section_blacklist'])
-                local_whitelist=set(search['section_whitelist'])
+                local_blacklist=set( blacklist+search['section_blacklist'] )
+                local_whitelist={re.compile(re.escape(mask).replace('\\*','.*')) for mask in search['section_whitelist']}
                 local_anylist = set(search['section_anylist'])
                 # Sets up a loop that will continue indefinitely until the last post of a search has been found.
                 while True:
@@ -269,8 +276,8 @@ def main():
                     for post in results:
                         tags = post.tags.split()
                         #if not all tag mask in whitelist have at least one match in tags skip post
-                        if local_whitelist and not all(True if any(fnmatch(tag, mask) for tag in tags) else False for mask in local_whitelist):
-                            print(f"[-] Post {post.id} was skipped for missing a requested tag.")
+                        if local_whitelist and not all( any(reg.fullmatch(tag) for tag in tags) for reg in local_whitelist):
+                            #print(f"[-] Post {post.id} was skipped for missing a requested tag.")
                             pass
                         elif post.rating not in search['ratings']:
                             #print(f"[-] Post {post.id} was skipped for missing a requested rating.")
@@ -329,7 +336,7 @@ def main():
     #----------HAAAAAAAAAAAAAAAAAX end -----
     
     print('')
-    input("[+] All searches complete. Press ENTER to exit...")
+    print("[+] All searches complete. Press ENTER to exit...")
     raise SystemExit
     
     
