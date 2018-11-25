@@ -9,6 +9,7 @@ import sqlite3
 import pickle
 from time import sleep
 from functools import lru_cache
+import hashlib
 
 #concurrent.futures.Executor
 #this is gonna be awesome
@@ -42,12 +43,22 @@ class DownloadQueue:
     def save(self):
         with self._lock:
             with open('download_queue.pickle', 'wb') as download_queue_file:
-                pickle.dump((self.last_id, self.completed, self._deque), download_queue_file, protocol=pickle.HIGHEST_PROTOCOL)
+                pickle.dump((
+                             self.last_id,
+                             self.completed,
+                             self._deque,
+                             self.completed_deque,
+                             self.config_hash
+                            ), download_queue_file, protocol=pickle.HIGHEST_PROTOCOL)
                 
     def load(self):
         with self._lock:
             with open('download_queue.pickle', 'rb') as download_queue_file:
-                self.last_id, self.completed, self._deque = pickle.load(download_queue_file)
+                (self.last_id,
+                 self.completed,
+                 self._deque,
+                 self.completed_deque,
+                 self.config_hash) = pickle.load(download_queue_file)
     
     def last(self):
         with self._lock:
@@ -61,9 +72,43 @@ class DownloadQueue:
         self._deque=deque()
         self.completed=False
         self.last_id = 0x7F_FF_FF_FF
+        self.completed_deque=deque()
+        try:
+            self.config_hash #checking if hash exists
+        except:
+            self.config_hash=None
+        
+    def completed_gen(self, name):
+        with self._lock:
+            self.completed_deque.append(name)
+            self.last_id = 0x7F_FF_FF_FF
+    
+    def check_config_hash(self, hash):
+        with self._lock:
+            if self.config_hash != hash:
+                if self._deque or not self.completed:
+                    print("[i] config.ini changed, resetting saved queue")
+                self.reset()
+                self.config_hash = hash
+            
+    def in_gens(self, name):
+        with self._lock:
+            return name in self.completed_deque
 
 class PostsStorage:
     def __init__(self):
+        pass
+    
+    def append(self, posts):
+        self.cur.executemany('INSERT OR REPLACE INTO posts VALUES (?,?)',
+            ( (post.id, pickle.dumps(post, protocol = pickle.HIGHEST_PROTOCOL) ) for post in posts) )
+        self.conn.commit()
+        
+    def close(self):
+        self.cur.close()
+        self.conn.close()
+        
+    def connect(self):
         self.conn = sqlite3.connect('posts.db')
         self.cur = self.conn.cursor()
         self.cur.executescript(
@@ -72,36 +117,17 @@ class PostsStorage:
                                UNIQUE
                                NOT NULL,
                 struct BLOB
-            ) WITHOUT ROWID;
-            
-            CREATE VIEW IF NOT EXISTS posts_only AS 
-               SELECT struct FROM posts ORDER BY id DESC;''')
-        self.conn.commit()          
-    
-    def append(self, posts):
-        self.cur.executemany('INSERT OR REPLACE INTO posts VALUES (?,?)',
-            ( (post.id, pickle.dumps(post, protocol = pickle.HIGHEST_PROTOCOL) ) for post in posts) )
+            ) WITHOUT ROWID;'''
+        )
         self.conn.commit()
+        self.cur.arraysize=constants.MAX_RESULTS
         
-    def __iter__(self):
-        self.cur.execute('SELECT * FROM posts_only')
-        return self
-        
-    def __next__(self):
-        posts=[]
-        try:
-            for i in range(320):
-                posts.append(pickle.loads(next(self.cur)[0]))
-        except StopIteration:
-            pass
-            
-        if posts:
-            return posts
-        else:
-            raise StopIteration
-        
-    def close(self):
-        self.conn.close()
+    def gen(self, last_id, **dummy):
+        self.cur.execute('SELECT struct FROM posts WHERE id<=? ORDER BY id DESC', (last_id,))
+        results=[pickle.loads(result[0]) for result in self.cur.fetchmany()]
+        while results:
+            yield results
+            results=[pickle.loads(result[0]) for result in self.cur.fetchmany()]
 
 _handler_gc_protection = [] #in case of lambdas
 
@@ -166,23 +192,10 @@ def make_check_funk(source_template, tags):
     tags_screened=[tag.replace("'","\\'") for tag in tags]
     source=source_template.format(*tags_screened)
     func_str=f'def f(tags): return {source}'
-    loc={}
-    exec(func_str,{'check':_check},loc)
-    return loc['f']
+    glob_dict={}
+    exec(func_str,glob_dict)
+    return glob_dict['f']
 
-def get_posts(search_string, earliest_date, last_id, session):
-    url = 'https://e621.net/post/index.json'
-    payload = {
-        'limit': constants.MAX_RESULTS,
-        'before_id': last_id,
-        'tags': f"date:>={earliest_date} {search_string}"
-    }
-
-    response = delayed_post(url, payload, session)
-    response.raise_for_status()
-
-    return make_posts_list(response.json())
-    
 FORBIDDEN_TAG_CHARS=r'%,#*'
 def tags_and_source_template(line):
     
@@ -201,7 +214,7 @@ def tags_and_source_template(line):
                 new_line.append(cur)
         elif cur in '-|&()':
             if cur == '-' and new_line[-1] != ' ':
-                new_line.append( cur )
+                new_line.append( cur ) #if '-' in a middle of a tag
             else:
                 new_line.extend( (' ',cur,' ') )
         elif cur == '~' and new_line[-1]==' ':
@@ -210,17 +223,22 @@ def tags_and_source_template(line):
         else:
             new_line.extend( cur )
                 
-    new_line=''.join(new_line)
+    new_line=''.join(new_line) #making string from 'StringBuffer' list
     tokens=[token for token in new_line.split(' ') if token]
     
     tags=[token.replace('\\','') for token in tokens if token not in '-|&()']
-    source_template=[token if token in ('-|&()') else "check('{}',tags)" for token in tokens]
-    source_template = ''.join(source_template).replace('-',' not ').replace('|',' or ').replace('&',' and ')
+    #source_template=[token if token in ('-|&()') else "check('{}',tags)" for token in tokens]
+    #source_template = ''.join(source_template).replace('-',' not ').replace('|',' or ').replace('&',' and ')
+    source_template=[token if token in ('-|&()') else "('{}' in tags)" for token in tokens]
+    source_template=[' not ' if token == '-' else token for token in source_template]
+    source_template=[' or ' if token == '|' else token for token in source_template]
+    source_template=[' and ' if token == '&' else token for token in source_template]
+    source_template = ''.join(source_template)
     
     try:
         make_check_funk(source_template, tags)(tags) # syntax validation
     except:
-        source_template = source_template.replace("check(\'{}\',tags)","{}")
+        source_template = source_template.replace("('{}' in tags)","{}")
         print(f'[!] Error in condition.')
         print(f"[!] Check if all '()|&' characters are properly screened and all braces are closed")
         print(f"[!] See source:\n    {source_template}")
@@ -236,6 +254,12 @@ def make_config():
         print("[i] New default config file created. Please add tag groups to this file.'")
     raise SystemExit
 
+def filehash(filename):
+    hash = hashlib.md5()
+    with open(filename, "rb") as f:
+        hash.update(f.read())
+    return hash.hexdigest()
+
 def get_config():
     config = configparser.ConfigParser()
 
@@ -246,7 +270,7 @@ def get_config():
     with open('config.ini', 'rt', encoding = 'utf_8_sig') as infile:
         config.read_file(infile)
 
-    return config
+    return config, filehash('config.ini')
 
 def get_date(days_to_check):
     ordinal_check_date = datetime.date.today().toordinal() - (days_to_check - 1)
@@ -269,10 +293,6 @@ def make_new_dir(dir_name):
     return clean_dir_name
     
 def make_path(dir_name, filename, ext):
-    #clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower()
-
-    #os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
-    
     return f"downloads/{make_new_dir(dir_name)}/{filename}.{ext}"
 
 def make_cache_folder():
@@ -281,13 +301,13 @@ def make_cache_folder():
     except FileExistsError:
         pass
     
-def get_files_dict(cachefunc):
+def get_files_dict(have_cache):
     filedict={}
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
             filedict[file]='{}/{}'.format(root,file)
     
-    if cachefunc:
+    if have_cache:
         for root, dirs, files in os.walk('cache/'):
             for file in files:
                 filedict[file]='{}/{}'.format(root,file)

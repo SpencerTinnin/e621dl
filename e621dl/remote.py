@@ -1,8 +1,7 @@
 # Internal Imports
 import os
-from time import sleep
+from time import sleep, time
 from datetime import datetime
-from timeit import default_timer
 from functools import lru_cache
 import sqlite3
 import pickle
@@ -19,10 +18,12 @@ from requests.packages.urllib3.util.retry import Retry
 class Post:
     __slots__=['id','tags','rating','id','md5','file_ext','file_url','score','fav_count','days_ago']
     def __init__(self, attrs):
-        attrs['days_ago']=(datetime.now()-datetime.fromtimestamp(attrs['created_at']['s'])).days
         for key, value in attrs.items():
             if key in self.__slots__:
                 setattr(self, key, value)
+
+        self.days_ago=(datetime.now()-datetime.fromtimestamp(attrs['created_at']['s'])).days
+        self.tags = self.tags.split()
 
 def make_posts_list(json_list):
     post_list=[]
@@ -52,9 +53,9 @@ def requests_retry_session(
 
 def delayed_post(url, payload, session):
     # Take time before and after getting the requests response.
-    start = default_timer()
+    start = time()
     response = session.post(url, data = payload)
-    elapsed = default_timer() - start
+    elapsed = time() - start
 
     # If the response took less than 0.5 seconds (only 2 requests are allowed per second as per the e621 API)
     # Wait for the rest of the 0.5 seconds.
@@ -71,7 +72,7 @@ def get_github_release(session):
 
     return response.json()['tag_name'].strip('v')
 
-def get_posts(search_string, earliest_date, last_id, session):
+def get_posts(last_id, search_string, earliest_date, session, **dummy):
     #raise NotImplementedError('not now')
     url = 'https://e621.net/post/index.json'
     payload = {
@@ -81,18 +82,24 @@ def get_posts(search_string, earliest_date, last_id, session):
     }
 
     while True:
-        response = delayed_post(url, payload, session)
+        start = time()
+        response = session.post(url, data = payload)
+        #response = delayed_post(url, payload, session)
         response.raise_for_status()
 
         results=make_posts_list(response.json())
-        yield results
+        if results:
+            yield results
         
         if len(results) < constants.MAX_RESULTS:
             break
         else:
             last_id = results[-1].id
             payload['before_id']   = last_id
-            
+        
+        elapsed = time() - start
+        if elapsed < 0.5:
+            sleep(0.5 - elapsed)
 
 def get_known_post(post_id, session):
     url = 'https://e621.net/post/show.json'
@@ -106,7 +113,7 @@ def get_known_post(post_id, session):
 @lru_cache(maxsize=512, typed=False)
 def get_tag_alias(user_tag, session):
     prefix = ''
-
+    
     if ':' in user_tag:
         print(f"[!] It is not possible to check if {user_tag} is valid.")
         return user_tag

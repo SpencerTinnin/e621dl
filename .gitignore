@@ -54,5 +54,9 @@ dist/
 
 # Repo Specific
 downloads/
+cache/
+download_queue.pickle
+posts.db
 build.bat
 config.ini
+
