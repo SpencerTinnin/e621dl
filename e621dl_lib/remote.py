@@ -7,8 +7,7 @@ import sqlite3
 import pickle
 
 # Personal Imports
-from e621dl import constants
-from e621dl import local
+from . import constants
 
 # Vendor Imports
 import requests

@@ -15,7 +15,7 @@ import hashlib
 #this is gonna be awesome
 
 # Personal Imports
-from e621dl import constants
+from . import constants
 
 class DownloadQueue:
     def __init__(self):

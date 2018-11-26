@@ -13,9 +13,9 @@ from threading import Thread, Lock
 from time import sleep
 
 # Personal Imports
-from e621dl import constants
-from e621dl import local
-from e621dl import remote
+from e621dl_lib import constants
+from e621dl_lib import local
+from e621dl_lib import remote
                 
 download_queue = local.DownloadQueue()
 
