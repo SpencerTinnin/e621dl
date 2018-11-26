@@ -26,6 +26,8 @@ class DownloadQueue:
         except:
             self.reset()
 
+        self.aborted = False
+
     def popleft(self):
         with self._lock:
             return self._deque.popleft()

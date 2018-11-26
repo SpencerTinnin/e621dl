@@ -81,9 +81,9 @@ def prefilter_build_index(kwargses, use_db):
             
             last_id = 0x7F_FF_FF_FF
             download_queue.completed_gen(kwargs['directory'])        
-            
+        download_queue.completed = True    
     finally:
-        download_queue.completed = True
+        download_queue.aborted = True
         if use_db:
             storage.close()
           
@@ -134,8 +134,8 @@ def main():
         for section in config.sections():
 
             make_cache_flag=False
-            # Get values from the "Other" section. Currently only used for file name appending.
-            if section.lower() == 'other':
+            # Get values from the "Settings" section. Currently only used for file name appending.
+            if section.lower() == 'settings':
                 for option, value in config.items(section):
                     if option.lower() == 'include_md5':
                         if value.lower() == 'true':
@@ -184,7 +184,7 @@ def main():
         # If the section name is not one of the above, it is assumed to be the values for a search.
         # two for cycles in case of e.g 'blacklist' is in the end of a config file 
         for section in config.sections():
-            if section.lower() not in {'other','defaults','blacklist'}:
+            if section.lower() not in {'settings','defaults','blacklist'}:
 
                 # Initialize the list of tags that will be searched.
                 section_tags = []
@@ -198,6 +198,7 @@ def main():
                 section_blacklist = []
                 section_whitelist = []
                 section_anylist = []
+                section_blacklisted = []
                 section_days_ago = default_days_ago
                 section_gen_func = default_gen_func
                 section_append_func = default_append_func
@@ -219,7 +220,7 @@ def main():
                         section_date = local.get_date(section_days_ago)
                         max_days_ago = max(max_days_ago, section_days_ago)
                     elif option.lower() in {'blacklist', 'blacklist_tags', 'blacklisted'}:
-                        section_blacklist += [remote.get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                        section_blacklisted = [remote.get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
                     elif option.lower() in {'min_score', 'score'}:
                         section_score = int(value)
                     elif option.lower() in {'min_favs', 'favs'}:
@@ -240,8 +241,9 @@ def main():
                             if allow_append:
                                 section_append_func = storage.append
                 
+                section_tags += ['-'+tag for tag in blacklist+section_blacklisted]
                 section_search_string = ' '.join(section_tags[:5])
-                section_blacklist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_blacklist+blacklist]
+                section_blacklist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_blacklist+blacklist+section_blacklisted]
                 section_whitelist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_whitelist]
                 section_anylist = [re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_anylist]
                 # Append the final values that will be used for the specific section to the list of searches.
@@ -292,7 +294,8 @@ def main():
             try:
                 chunk = download_queue.first()
             except:
-                if download_queue.completed:
+            
+                if download_queue.aborted:
                     break
                 else:
                     sleep(0.5)
@@ -326,11 +329,9 @@ def main():
         # End program.
     
     
-    #----------HAAAAAAAAAAAAAAAAAX ---------
-    download_queue.reset()
-    
-    #----------HAAAAAAAAAAAAAAAAAX end -----
-    
+    if download_queue.completed:
+        download_queue.reset()
+        
     print('')
     print("[+] All searches complete. Press ENTER to exit...")
     raise SystemExit
