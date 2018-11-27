@@ -294,8 +294,8 @@ def make_new_dir(dir_name):
     os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
     return clean_dir_name
     
-def make_path(dir_name, filename, ext):
-    return f"downloads/{make_new_dir(dir_name)}/{filename}.{ext}"
+def make_path(dir_name, filename):
+    return f"downloads/{make_new_dir(dir_name)}/{filename}"
 
 def make_cache_folder():
     try:

@@ -11,6 +11,7 @@ from shutil import copy
 from collections import deque
 from threading import Thread, Lock
 from time import sleep
+from concurrent.futures import ThreadPoolExecutor
 
 # Personal Imports
 from e621dl_lib import constants
@@ -48,6 +49,22 @@ def process_results(results, whitelist, blacklist, anylist, cond_func, ratings, 
             #print('really')
             filtered_results.append(post)
     return filtered_results
+
+def get_files(post, include_md5, directory, files, session, cachefunc, duplicate_func):
+    filename = (f'{post.id}.{post.md5}.{post.file_ext}' if include_md5
+                else f'{post.id}.{post.file_ext}')
+    path = local.make_path(directory, filename)
+    
+    if os.path.isfile(path):
+        return
+
+    elif filename in files:
+        duplicate_func(files[filename], path)
+        return
+    else:
+        print(f"[+] Post {post.id} is being downloaded.")
+        if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
+            files[filename]=path
 
 #@profile
 def prefilter_build_index(kwargses, use_db):
@@ -305,25 +322,12 @@ def main():
                 # Sets up a loop that will continue indefinitely until the last post of a search has been found.
                 results = process_results(chunk,**search)
                 directory = search['directory']
-                    
-                for post in results:
-                    if include_md5:
-                        filename='{}.{}.{}'.format(post.id,post.md5,post.file_ext)
-                        path = local.make_path(directory, f"{post.id}.{post.md5}", post.file_ext)
-                    else:
-                        filename='{}.{}'.format(post.id, post.file_ext)
-                        path = local.make_path(directory, post.id, post.file_ext)
-                    
-                    if os.path.isfile(path):
-                        continue
-
-                    elif filename in files:
-                        duplicate_func(files[filename], path)
-                        continue
-                    else:
-                        print(f"[+] Post {post.id} is being downloaded.")
-                        if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
-                            files[filename]=path
+                
+                with ThreadPoolExecutor(max_workers=2) as download_pool:
+                    for post in results:
+                        download_pool.submit(get_files,
+                            post,include_md5, directory, files,
+                            session, cachefunc, duplicate_func)
 
             download_queue.popleft()
         # End program.
