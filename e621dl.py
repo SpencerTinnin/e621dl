@@ -307,6 +307,8 @@ def main():
         queue_thread=Thread(target=prefilter_build_index, args=(kwargs, use_db))
         queue_thread.start()
         
+        download_pool=ThreadPoolExecutor(max_workers=2)
+        
         while True:
             try:
                 chunk = download_queue.first()
@@ -323,11 +325,15 @@ def main():
                 results = process_results(chunk,**search)
                 directory = search['directory']
                 
-                with ThreadPoolExecutor(max_workers=2) as download_pool:
-                    for post in results:
-                        download_pool.submit(get_files,
-                            post,include_md5, directory, files,
-                            session, cachefunc, duplicate_func)
+                futures = []
+                for post in results:
+                    futures.append(download_pool.submit(get_files,
+                        post,include_md5, directory, files,
+                        session, cachefunc, duplicate_func))
+                
+                for future in futures:
+                    if future.exception():
+                        raise future.exception()
 
             download_queue.popleft()
         # End program.
