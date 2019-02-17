@@ -52,7 +52,7 @@ def requests_retry_session(
     session.mount('https://', adapter)
     return session
 
-def check_cloudflare(session, response):
+def check_cloudflare(response):
     if response.status_code != 403:
         return False
     elif not response.text.lower().find("cloudflare"):
@@ -66,9 +66,9 @@ def solve_captcha(session, response):
     splitted=urlparse(url)
     baseurl=f"{splitted.scheme}://{splitted.netloc}"
     
-    #Zalgo. He comes.
-    #To be fair, you can use regexps to search in
-    #particular html
+    # Zalgo. He comes.
+    # To be fair, you can use regexps to search in
+    # an html with a known structure.
     hidden_input_re = re.compile('<input type="hidden" name="(.*?)" value="(.*?)"')
     textarea_re = re.compile('<textarea .*? name="(.*?)"')
     form_re = re.compile('<form .*? action="(.*?)" method="(.*?)"')
@@ -119,13 +119,12 @@ def solve_captcha(session, response):
     
     if form_method == "get":
         response = session.get(form_url, params=payload)
-        #print("got new response")
     elif form_method == "post":
         response = session.post(form_url, data=payload)
     else:
         print("unknown method")
     
-    return response.status_code != 403
+    return not check_cloudflare(response) #means we solve a captcha
 
 def delayed_post(url, payload, session):
     # Take time before and after getting the requests response.
@@ -138,7 +137,8 @@ def delayed_post(url, payload, session):
     if elapsed < 0.5:
         sleep(0.5 - elapsed)
 
-    if check_cloudflare(session, response) and solve_captcha(session, response):
+    if check_cloudflare(response):
+        solve_captcha(session, response)
         return delayed_post(url, payload, session)
     
     return response
@@ -224,27 +224,35 @@ def get_tag_alias(user_tag, session):
             print(f"[+] The tag {prefix}{user_tag} is valid.")
             return f"{prefix}{user_tag}"
 
-    url = 'https://e621.net/tag_alias/index.json'
-    payload = {'approved': 'true', 'query': user_tag}
+    pagenum = 1
+    def alias_chunk():
+        url = 'https://e621.net/tag_alias/index.json'
+        payload = {'approved': 'true', 'query': user_tag, 'page': pagenum}
 
-    response = delayed_post(url, payload, session)
-    response.raise_for_status()
+        response = delayed_post(url, payload, session)
+        response.raise_for_status()
 
-    results = response.json()
+        results = response.json()
+        return results
 
-    for tag in results:
-        if user_tag == tag['name']:
-            url = 'https://e621.net/tag/show.json'
-            payload = {'id': tag['alias_id']}
+    results = alias_chunk()
+    while results:
+        for tag in results:
+            if user_tag == tag['name']:
+                url = 'https://e621.net/tag/show.json'
+                payload = {'id': tag['alias_id']}
 
-            response = delayed_post(url, payload, session)
-            response.raise_for_status()
+                response = delayed_post(url, payload, session)
+                response.raise_for_status()
 
-            results = response.json()
+                results = response.json()
 
-            print(f"[+] The tag {prefix}{user_tag} was changed to {prefix}{results['name']}.")
+                print(f"[+] The tag {prefix}{user_tag} was changed to {prefix}{results['name']}.")
 
-            return f"{prefix}{results['name']}"
+                return f"{prefix}{results['name']}"
+        
+        pagenum += 1
+        results = alias_chunk()
 
     print(f"[!] The tag {prefix}{user_tag} is spelled incorrectly or does not exist.")
     raise SystemExit

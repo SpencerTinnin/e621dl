@@ -58,5 +58,6 @@ cache/
 download_queue.pickle
 posts.db
 build.bat
-config.ini
+config.ini*
+*.exe
 

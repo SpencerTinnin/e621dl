@@ -11,9 +11,6 @@ from time import sleep
 from functools import lru_cache
 import hashlib
 
-#concurrent.futures.Executor
-#this is gonna be awesome
-
 # Personal Imports
 from . import constants
 
@@ -285,8 +282,11 @@ def get_date(days_to_check):
     return datetime.date.fromordinal(ordinal_check_date).strftime('%Y-%m-%d')
 
 def substitute_illegals(char):
-    illegals = ['\\', ':', '*', '?', '\"', '<', '>', '|', '/']
-    return '_' if char in illegals else char
+    illegals = [':', '*', '?', '\"', '<', '>', '|']
+    path_chars = ['\\', '/']
+    char = '_' if char in illegals else char
+    char = '/' if char in path_chars else char
+    return char
 
 @lru_cache(maxsize=512, typed=False)
 def make_new_dir(dir_name):

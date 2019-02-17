@@ -3,15 +3,13 @@
 
 # Internal Imports
 import os
-import pickle
 import re
 from distutils.version import StrictVersion
-from fnmatch import fnmatch
 from shutil import copy
-from collections import deque
-from threading import Thread, Lock
+from threading import Thread
 from time import sleep
 from concurrent.futures import ThreadPoolExecutor
+from traceback import print_exc
 
 # Personal Imports
 from e621dl_lib import constants
@@ -98,7 +96,10 @@ def prefilter_build_index(kwargses, use_db):
             
             last_id = 0x7F_FF_FF_FF
             download_queue.completed_gen(kwargs['directory'])        
-        download_queue.completed = True    
+        download_queue.completed = True
+    except:
+        print("Exception in api iterator:")
+        print_exc()
     finally:
         download_queue.aborted = True
         if use_db:
@@ -112,11 +113,7 @@ def main():
         # Set the user-agent. Requirements are specified at https://e621.net/help/show/api#basics.
         session.headers['User-Agent'] = f"e621dl (lurkbbs) -- Version {constants.VERSION}"
         
-        # Check if a new version is released on github. If so, notify the user.
-        # if StrictVersion(constants.VERSION) < StrictVersion(remote.get_github_release(session)):
-        #    print('A NEW VERSION OF e621dl IS AVAILABLE ON GITHUB AT https://github.com/Wulfre/e621dl/releases/latest.')
-
-        print(f"[i] Running e621dl version {constants.VERSION}.")
+        print(f"[i] Running e621dl version {constants.VERSION}")
 
         print('')
         print("[i] Parsing config...")
@@ -333,7 +330,13 @@ def main():
                 
                 for future in futures:
                     if future.exception():
-                        raise future.exception()
+                        try:
+                            raise future.exception()
+                        except: #Pull request a better way
+                            print("Exception during download:")
+                            print_exc()
+                            download_queue.save()
+                            os._exit(0)
 
             download_queue.popleft()
         # End program.
