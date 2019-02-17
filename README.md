@@ -100,6 +100,14 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; tags = cat, cute 
 
 ; Example:
+; [Cats/WildCats]
+; days = 30
+; ratings = s
+; min_score = 5
+; min_favs = 0
+; tags = wildcat 
+
+; Example:
 ; [Cute Cats or Dogs]
 ; tags =  ~cat ~dog cute
 
@@ -133,6 +141,8 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ```
 
 The following characters are not allowed in search group names: `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, `/` as they can cause issues in windows file directories. If any of these characters are used, they will be replaced with the `_` character.
+
+These characters are folder separators: `\` `/`. Use them to create subfolders inside a folder inside `downloads`, for e.g. collection sorting.
 
 Commas or spaces are used to separate tags and ratings.
 

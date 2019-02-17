@@ -1,4 +1,4 @@
-VERSION = '5.1.0'
+VERSION = '5.2.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
@@ -88,6 +88,14 @@ db = true
 ; min_score = 5
 ; min_favs = 0
 ; tags = cat, cute 
+
+; Example:
+; [Cats/WildCats]
+; days = 30
+; ratings = s
+; min_score = 5
+; min_favs = 0
+; tags = wildcat
 
 ; Example:
 ; [Cute Cats or Dogs]
