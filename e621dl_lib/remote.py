@@ -18,18 +18,18 @@ from requests.packages.urllib3.util.retry import Retry
 
 class Post:
     __slots__=['id','tags','rating','id','md5','file_ext','file_url','score','fav_count','days_ago']
-    def __init__(self, attrs):
+    def __init__(self, attrs, metatags):
         for key, value in attrs.items():
             if key in self.__slots__:
                 setattr(self, key, value)
 
         self.days_ago=(datetime.now()-datetime.fromtimestamp(attrs['created_at']['s'])).days
-        self.tags = self.tags.split()
+        self.tags = self.tags.split() + metatags
 
-def make_posts_list(json_list):
+def make_posts_list(json_list, metatags):
     post_list=[]
     for post in json_list:
-        post_list.append(Post(post))
+        post_list.append(Post(post, metatags))
     return post_list
 
 def requests_retry_session(
@@ -151,8 +151,10 @@ def get_github_release(session):
 
     return response.json()['tag_name'].strip('v')
 
-def get_posts(last_id, search_string, earliest_date, session, **dummy):
-    #raise NotImplementedError('not now')
+def get_posts(last_id, search_tags, earliest_date, session, **dummy):
+ 
+    metatags =[tag for tag in search_tags if ':' in tag and tag[0] not in '~-' and '*' not in tag]
+    search_string = ' '.join(search_tags)
     url = 'https://e621.net/post/index.json'
     payload = {
         'limit': constants.MAX_RESULTS,
@@ -163,10 +165,9 @@ def get_posts(last_id, search_string, earliest_date, session, **dummy):
     while True:
         start = time()
         response = session.post(url, data = payload)
-        #response = delayed_post(url, payload, session)
         response.raise_for_status()
 
-        results=make_posts_list(response.json())
+        results=make_posts_list(response.json(), metatags)
         if results:
             yield results
         

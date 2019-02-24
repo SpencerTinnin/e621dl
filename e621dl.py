@@ -26,7 +26,6 @@ def process_results(results, whitelist, blacklist, anylist, cond_func, ratings, 
 
     for post in results:
         tags = post.tags
-        
         if whitelist and not all( any(reg.fullmatch(tag) for tag in tags) for reg in whitelist ):
             continue
         elif blacklist and any( any(reg.fullmatch(tag) for tag in tags) for reg in blacklist ):
@@ -256,7 +255,7 @@ def main():
                                 section_append_func = storage.append
                 
                 section_tags += ['-'+tag for tag in blacklist+section_blacklisted]
-                section_search_string = ' '.join(section_tags[:5])
+                section_search_tags = section_tags[:5]
                 section_blacklist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_blacklist+blacklist+section_blacklisted]
                 section_whitelist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_whitelist]
                 section_anylist = [re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_anylist]
@@ -264,7 +263,7 @@ def main():
                 # Note section_tags is a list within a list.
                 
                 section_dict = {'directory': section.strip(),
-                                 'search_string': section_search_string,
+                                 'search_tags': section_search_tags,
                                  'ratings': section_ratings,
                                  'min_score': section_score,
                                  'min_favs': section_favs, 
