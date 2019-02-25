@@ -156,11 +156,23 @@ def get_posts(last_id, search_tags, earliest_date, session, **dummy):
     metatags =[tag for tag in search_tags if ':' in tag and tag[0] not in '~-' and '*' not in tag]
     search_string = ' '.join(search_tags)
     url = 'https://e621.net/post/index.json'
-    payload = {
-        'limit': constants.MAX_RESULTS,
-        'before_id': last_id,
-        'tags': f"date:>={earliest_date} {search_string}"
-    }
+    reordered = False
+    
+    if any("order:" in metatag for metatag in metatags):
+        payload = {
+            'limit': constants.MAX_RESULTS,
+            'page': 1,
+            'tags': f"date:>={earliest_date} {search_string}"
+            #'tags': search_string
+        }
+        reordered = True
+    else:
+        payload = {
+            'limit': constants.MAX_RESULTS,
+            'before_id': last_id,
+            'tags': f"date:>={earliest_date} {search_string}"
+            #'tags': search_string
+        }
 
     while True:
         start = time()
@@ -173,6 +185,10 @@ def get_posts(last_id, search_tags, earliest_date, session, **dummy):
         
         if len(results) < constants.MAX_RESULTS:
             break
+        elif reordered:
+            payload['page'] += 1
+            if payload['page'] > 750:
+                break
         else:
             last_id = results[-1].id
             payload['before_id']   = last_id

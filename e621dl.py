@@ -20,6 +20,7 @@ download_queue = local.DownloadQueue()
 
 storage = local.PostsStorage()
 
+#TODO: prefilter countdown
 
 def process_results(results, whitelist, blacklist, anylist, cond_func, ratings, min_score, min_favs, days_ago, **dummy):
     filtered_results=[]
@@ -78,8 +79,9 @@ def prefilter_build_index(kwargses, use_db):
         
         for kwargs in kwargses:
 
+            directory = kwargs['directory']
             print('')
-            print(f"[i] getting tags for {kwargs['directory']}")            
+            print(f"[i] getting tags for {directory}")            
             gen = kwargs['gen_funcs']
             append_func=kwargs['append_func']
             max_days_ago=kwargs['days_ago']
@@ -87,14 +89,16 @@ def prefilter_build_index(kwargses, use_db):
             for results in gen(last_id, **kwargs):
                 append_func(results)
                 filtered_results=process_results(results, **kwargs)
-                download_queue.append(filtered_results)
+                download_queue.append( (directory, filtered_results) )
                 post=results[-1]
                 download_queue.last_id=post.id
                 if post.days_ago >= max_days_ago:
                     break
+                if kwargs['posts_countdown'] <= 0:
+                    break
             
             last_id = 0x7F_FF_FF_FF
-            download_queue.completed_gen(kwargs['directory'])        
+            download_queue.completed_gen(directory)
         download_queue.completed = True
     except:
         print("Exception in api iterator:")
@@ -131,6 +135,7 @@ def main():
         default_score = -0x7F_FF_FF_FF # Allow posts of any score to be downloaded.
         default_favs = 0
         default_ratings = ['s'] # Allow only safe posts to be downloaded.
+        default_posts_limit = float('inf')
         
         duplicate_func = copy
         cachefunc = None
@@ -182,6 +187,8 @@ def main():
                         default_favs = int(value)
                     elif option.lower() in {'ratings', 'rating'}:
                         default_ratings = value.replace(',', ' ').lower().strip().split()
+                    elif option.lower() in {'limit', 'max_downloads', 'posts_limit', 'files_limit'}:
+                        default_posts_limit = int(value)
                     elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from','post_func', 'post_source'}:
                         if value.lower() in {'db','database','local'}:
                             default_gen_func=storage.gen
@@ -215,6 +222,7 @@ def main():
                 section_days_ago = default_days_ago
                 section_gen_func = default_gen_func
                 section_append_func = default_append_func
+                section_post_limit = default_posts_limit
 
                 # Go through each option within the section to find search related values.
                 for option, value in config.items(section):
@@ -240,6 +248,8 @@ def main():
                         section_favs = int(value)
                     elif option.lower() in {'ratings', 'rating'}:
                         section_ratings = value.replace(',', ' ').lower().strip().split()
+                    elif option.lower() in {'limit', 'max_downloads', 'posts_limit', 'files_limit'}:
+                        section_post_limit = int(value)
                     elif option.lower() in {'condition', 'conditions'}:
                         source_template, tags = local.tags_and_source_template(value.lower().strip())
                         tags = [remote.get_tag_alias(tag.lower(), session) for tag in tags]
@@ -262,7 +272,7 @@ def main():
                 # Append the final values that will be used for the specific section to the list of searches.
                 # Note section_tags is a list within a list.
                 
-                section_dict = {'directory': section.strip(),
+                section_dict = { 'directory': section.strip(),
                                  'search_tags': section_search_tags,
                                  'ratings': section_ratings,
                                  'min_score': section_score,
@@ -275,6 +285,7 @@ def main():
                                  'cond_func': section_cond_func,
                                  'gen_funcs': section_gen_func,
                                  'append_func': section_append_func,
+                                 'posts_countdown': section_post_limit,
                                  'session'  : session}
                 if section.lower() == 'prefilter':
                     prefilter=section_dict
@@ -307,7 +318,7 @@ def main():
         
         while True:
             try:
-                chunk = download_queue.first()
+                chunk_directory, chunk = download_queue.first()
             except:
             
                 if download_queue.aborted:
@@ -315,18 +326,27 @@ def main():
                 else:
                     sleep(0.5)
                     continue
-
+    
             for search in searches:
                 # Sets up a loop that will continue indefinitely until the last post of a search has been found.
-                results = process_results(chunk,**search)
                 directory = search['directory']
-                
+                if chunk_directory.lower() not in (directory.lower(), 'prefilter'):
+                    continue
+
+                results = process_results(chunk, **search)
                 futures = []
+                
                 for post in results:
+                    if search['posts_countdown'] <= 0:
+                        break
+                        
                     futures.append(download_pool.submit(get_files,
                         post,include_md5, directory, files,
                         session, cachefunc, duplicate_func))
-                
+                    
+                    search['posts_countdown'] -= 1
+                    
+
                 for future in futures:
                     if future.exception():
                         try:
