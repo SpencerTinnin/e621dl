@@ -132,10 +132,11 @@ def delayed_post(url, payload, session):
     response = session.post(url, data = payload)
     elapsed = time() - start
 
-    # If the response took less than 0.5 seconds (only 2 requests are allowed per second as per the e621 API)
-    # Wait for the rest of the 0.5 seconds.
-    if elapsed < 0.5:
-        sleep(0.5 - elapsed)
+    # Citation from e621:api
+    # "You should make a best effort not to make 
+    # more than one request per second over a sustained period."
+    if elapsed < 1.0:
+        sleep(1.0 - elapsed)
 
     if check_cloudflare(response):
         solve_captcha(session, response)
@@ -194,8 +195,8 @@ def get_posts(last_id, search_tags, earliest_date, session, **dummy):
             payload['before_id']   = last_id
         
         elapsed = time() - start
-        if elapsed < 0.5:
-            sleep(0.5 - elapsed)
+        if elapsed < 1.0:
+            sleep(1.0 - elapsed)
 
 def get_known_post(post_id, session):
     url = 'https://e621.net/post/show.json'
