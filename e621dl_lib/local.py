@@ -288,14 +288,18 @@ def substitute_illegals(char):
     char = '/' if char in path_chars else char
     return char
 
+def substitute_illegals_filename(filename):
+    illegals = [':', '*', '?', '\"', '<', '>', '|', '\\', '/']
+    return ''.join([char if char not in illegals else '_' for char in filename])
+
 @lru_cache(maxsize=512, typed=False)
 def make_new_dir(dir_name):
     clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower()
     os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
     return clean_dir_name
-    
+
 def make_path(dir_name, filename):
-    return f"downloads/{make_new_dir(dir_name)}/{filename}"
+    return f"downloads/{make_new_dir(dir_name)}/{substitute_illegals_filename(filename)}"
 
 def make_cache_folder():
     try:
@@ -307,11 +311,26 @@ def get_files_dict(have_cache):
     filedict={}
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
-            filedict[file]='{}/{}'.format(root,file)
+            splitted=file.split('.')
+            if splitted[-1]=='request':
+                id=file.split('.')[-3] #id section
+            else:
+                id=file.split('.')[-2] #id section
+            id=int(id)
+            filedict[id]='{}/{}'.format(root,file)
     
     if have_cache:
         for root, dirs, files in os.walk('cache/'):
             for file in files:
-                filedict[file]='{}/{}'.format(root,file)
+                id=file.split('.')[-2] #id section
+                id=int(id)
+                filedict[id]='{}/{}'.format(root,file)
     
     return filedict
+    
+def validate_format(format):
+    post = {i:i for i in constants.DEFAULT_SLOTS}
+    try:
+        dummy = format.format(**post)
+    except:
+        print("Invalid format:", format)

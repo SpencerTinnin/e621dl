@@ -1,67 +1,47 @@
-VERSION = '5.3.1'
+VERSION = '5.4.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
+
+DEFAULT_SLOTS = ['id','tags','rating','md5','file_ext','file_url',
+                 'score','fav_count','days_ago', 'sources', 'artist', 'description',
+                 'file_size', 'width', 'height', 'author', 'creator_id', 'created_at']
 
 DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;; GENERAL  ;;
 ;;;;;;;;;;;;;;
 
-[Defaults]
-days = 1
-ratings = s
-min_score = 0
-min_favs = 0
-post_source = api
+;These are default values
+;[Settings]
+;include_md5 = false
+;make_hardlinks = false
+;make_cache = false
+;db = false
 
-[Blacklist]
-tags =
+;These are default settings for all search groups below
+;[Defaults]
+;days = 1
+;min_score = -2147483647
+;min_favs = 0
+;ratings = s
+;max_downloads = inf
+;post_from = api
+;max_downloads = 12
+;format = 
 
-; If 'make_hardlinks' options is set,
-; same files will not be copied from different folder,
-; instead, hardlink will be created
-;
-; If 'make_cache' options is set,
-; cache folder will be created,and there will be copy
-; or hardlink of every downloaded files
-; it maybe useful if you want do delete all your downloads
-; before using new config.ini 
-;
-; If 'db' options is set,
-; useful info of every post will be stored in a database
-[Settings]
-include_md5 = false
-make_hardlinks = true
-make_cache = true
-db = true
+;This is a special prefiltration section.
+;If it exists, all subsequent search groups
+;use results obtained from prefiltered search.
+;Due to some limitations,metatags in other
+;search groups are not supported.
+;Mostly useful if you have a lot of searches
+;that all have something in common.
+;[Prefilter]
+;tags = 
+;condition = 
 
-; If you uncomment this section and option 'tags',
-; post list will be requested all at once using
-; tags and condition, and then list will be
-; additionally filtered in all search groups.
-; You should prepend '\' before symbols '|&()'
-; if they are part of a tag in the condition.
-; Blacklist will be used from section [Blacklist]
-; & is "and", | is "or", -is "not".
-; E.g. "condition = traditional_media_\(artwork\) | (digital_media_\(artwork\) & -3d_\(artwork\))"
-; means traditional art or digital_media that is not 3d is allowed.
-; This may be useful in case of
-; [cat]
-; tags = cat
-; [cat and dog]
-; tags = cat dog
-; [cat and not mouse]
-; tags = cat -mouse
-; or something like that.
-; '*' and tag aliases are allowed.
-; 
-; Prefilter works the same as regular directory,
-; But directory will not be created and
-; only prefilter parameters will be used in
-; getting posts' info from e621. 
-; [Prefilter]
-; tags = tag1 tag2 -tag3 *manytags*
-; condition = tag | (tag_with_\&_or_\| or \(with_braces\))
+;[Blacklist]
+;tags = yaoi
 
 ;;;;;;;;;;;;;;;;;;;
 ;; SEARCH GROUPS ;;
@@ -90,15 +70,17 @@ db = true
 ; tags = cat, cute 
 
 ; Example:
+; This will create folder "Cats" and
+; subfolder "Wildcats" inside "Cats"
 ; [Cats/WildCats]
 ; days = 30
 ; ratings = s
 ; min_score = 5
 ; min_favs = 0
-; tags = wildcat
+; tags = wildcat 
 
 ; Example:
-; [Cute Cats or Dogs]
+; [Cute Cats or Cute Dogs]
 ; tags =  ~cat ~dog cute
 
 ; Example:
@@ -106,6 +88,15 @@ db = true
 ; tags =  cat -dog cute
 
 ; Example:
+; This condition means this:
+; no post with tag "sad" will be downloaded.
+; If there is no "sad" tag than if
+; there are both tags "cute" and "happy"
+; and/or
+; there are both tags "smile" and "closed_eyes"
+; then post will be downloaded.
+; So, condition is
+; no "sad" tag and ( ("cute" tag and "happy tag") and/or ("smile" tag and "closed_eyes" tag))
 ; [Conditional Cat]
 ; tags = cat
 ; condition = -sad & ( (cute & happy) | (smile & closed_eyes) )
@@ -118,12 +109,6 @@ db = true
 ; [Video Cat]
 ; tags = cat type:webm
 
-
-; Note: blacklisted option is client-side and
-; therefore inefficient. I recommend not to use it
-; unless you have five or more regular tags.
-; But since this option was a popular demand,
-; I added it anyway.
 ; Example:
 ; [Blacklisted Cat]
 ; tags = cat
@@ -133,5 +118,18 @@ db = true
 ; [Database Cat]
 ; tags = cat
 ; post_source = db
+
+; This will download only top 10 highest score posts
+; Example:
+; [Top Ten Cat]
+; tags = order:score cat
+; max_downloads = 10
+
+; This will generate filenames like artistname.id.extension,
+; e.g. suncelia.1572867.jpg
+; Example:
+; [Formatted Cat]
+; tags = cat
+; format = {artist}
 
 '''

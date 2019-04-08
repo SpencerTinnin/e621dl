@@ -23,6 +23,7 @@ Main features of this fork:
 - You can store all posts info from API to local database. This also default behavior.
 - You can use said database as source of file link and filtered data instead of API. Combined with cache and deduplication, you can recreate downloads folder at any time with different filters. One limitation is you cannot use metatags with database search.
 - You can use one API or DB prefilter to iterate over posts, with other searches using prefiltered results. Limitation is you cannot use metatags anywhere except for prefilter.
+- **Cloudflare captcha support**. Note: this is not captcha bypass, you're still need to solve it in a browser with special addon, launched from the same IP address with e621dl.
 
 # Installing and Setting Up **e621dl**
 
@@ -70,9 +71,45 @@ These errors are normal behavior for a first run, and should not raise any alarm
 
 ## Add search groups to the config file.
 
-Create sections in the `config.ini` to specify which posts you would like to download. In the default config file, an example is provided for you. This example is replecated below. Each section will have its own directory inside the downloads folder.
+Create sections in the `config.ini` to specify which posts you would like to download. In the default config file, an example is provided for you. This example is replicated below. Each section will have its own directory inside the downloads folder.
 
-```
+```ini
+;;;;;;;;;;;;;;
+;; GENERAL  ;;
+;;;;;;;;;;;;;;
+
+;These are default values
+;[Settings]
+;include_md5 = false
+;make_hardlinks = false
+;make_cache = false
+;db = false
+
+;These are default settings for all search groups below
+;[Defaults]
+;days = 1
+;min_score = -2147483647
+;min_favs = 0
+;ratings = s
+;max_downloads = inf
+;post_from = api
+;max_downloads = 12
+;format = 
+
+;This is a special prefiltration section.
+;If it exists, all subsequent search groups
+;use results obtained from prefiltered search.
+;Due to some limitations,metatags in other
+;search groups are not supported.
+;Mostly useful if you have a lot of searches
+;that all have something in common.
+;[Prefilter]
+;tags = 
+;condition = 
+
+;[Blacklist]
+;tags = yaoi
+
 ;;;;;;;;;;;;;;;;;;;
 ;; SEARCH GROUPS ;;
 ;;;;;;;;;;;;;;;;;;;
@@ -100,6 +137,8 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; tags = cat, cute 
 
 ; Example:
+; This will create folder "Cats" and
+; subfolder "Wildcats" inside "Cats"
 ; [Cats/WildCats]
 ; days = 30
 ; ratings = s
@@ -108,7 +147,7 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; tags = wildcat 
 
 ; Example:
-; [Cute Cats or Dogs]
+; [Cute Cats or Cute Dogs]
 ; tags =  ~cat ~dog cute
 
 ; Example:
@@ -116,6 +155,15 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; tags =  cat -dog cute
 
 ; Example:
+; This condition means this:
+; no post with tag "sad" will be downloaded.
+; If there is no "sad" tag than if
+; there are both tags "cute" and "happy"
+; and/or
+; there are both tags "smile" and "closed_eyes"
+; then post will be downloaded.
+; So, condition is
+; no "sad" tag and ( ("cute" tag and "happy tag") and/or ("smile" tag and "closed_eyes" tag))
 ; [Conditional Cat]
 ; tags = cat
 ; condition = -sad & ( (cute & happy) | (smile & closed_eyes) )
@@ -128,7 +176,6 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; [Video Cat]
 ; tags = cat type:webm
 
-
 ; Example:
 ; [Blacklisted Cat]
 ; tags = cat
@@ -138,6 +185,19 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; [Database Cat]
 ; tags = cat
 ; post_source = db
+
+; This will download only top 10 highest score posts
+; Example:
+; [Top Ten Cat]
+; tags = order:score cat
+; max_downloads = 10
+
+; This will generate filenames like artistname.id.extension,
+; e.g. suncelia.1572867.jpg
+; Example:
+; [Formatted Cat]
+; tags = cat
+; format = {artist}
 ```
 
 The following characters are not allowed in search group names: `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, `/` as they can cause issues in windows file directories. If any of these characters are used, they will be replaced with the `_` character.
@@ -150,17 +210,19 @@ One side effect of the workaround used to search an unlimited number tags is tha
 
 ### Search Group Keys, Values, and Descriptions
 
-Key                   | Acceptable Values               | Description
---------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------
-[]                    | Nearly Anything                 | The search group name which will be used to title console output and name folders. See above for restrictions.
-days                  | Integer from `1` to ∞           | How many days into the past to check for new posts.
-ratings               | Characters `s`, `q`, and/or `e` | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively.
-min_score             | Integer from -∞ to ∞            | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded.
-min_favs              | Integer from 0 to ∞             | Same as _min_score_, but for favorites.
-tags                  | Nearly Anything                 | Tags which will be used to perform the post search. See above for restrictions.
-blacklisted           | Nearly Anything                 | Essentialy the same as _-tags_ at the and of a tag list.
-post_source           | `api` or `db`                   | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details.
-condition             | Nearly Anything                 | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details.
+| Key           | Acceptable Values               | Description                                                  |
+| ------------- | ------------------------------- | ------------------------------------------------------------ |
+| []            | Nearly Anything                 | The search group name which will be used to title console output and name folders. See above for restrictions. |
+| days          | Integer from `1` to ∞           | How many days into the past to check for new posts.          |
+| ratings       | Characters `s`, `q`, and/or `e` | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
+| min_score     | Integer from -∞ to ∞            | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
+| min_favs      | Integer from 0 to ∞             | Same as _min_score_, but for favorites.                      |
+| tags          | Nearly Anything                 | Tags which will be used to perform the post search. See above for restrictions. |
+| blacklisted   | Nearly Anything                 | Essentially the same as _-tags_ at the and of a tag list.    |
+| post_source   | `api` or `db`                   | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
+| condition     | Nearly Anything                 | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
+| max_downloads | Integer from `1` to ∞           | Limits number of downloaded posts in addition to time of upload. |
+| format        | see below                       | Allows to format filename beside id.extension. See below for details |
 
 ### Conditions
 
@@ -193,6 +255,48 @@ This means that if there is tag "sad" in post, condition is not fulfilled. Other
 
 By default, all posts' info are stored in local database. So, if `post_source` set to `db`, all info, e.g. rating, creation date or link to file will be from there, not from e621 api. In combination with local file cache, this can be used to recreate folders with new filtering, more strict or more relaxed. `api` is default, but this can be overwritten in `Defaults` section.
 
+### Format of filenames
+
+By default, filenames looks like `1572867.jpg`, but you can change it, using with format field. Example:
+
+`format = Artist name -- {artist} and score is {score}`
+
+Will produce this file:
+
+`Artist name -- suncelia and score is 17.1572867.jpg`
+
+Following fields are supported:
+
+* id
+* rating
+* id
+* md5
+* file_ext
+* score
+* fav_count
+* artist
+* file_size
+* width
+* height
+* author
+* creator_id
+
+Notes:
+
+* author is uploader's username, not artist's name. Use artist for that. creator_id 
+* creator_id is id of uploader, not artist
+
+There may be more supported fields in the future, but I don't promise anything unless you create a feature request in [Issues](https://github.com/lurkbbs/e621dl/issues).
+
+### Order metatag family
+
+Metatags like `order:score` and other `order:smth` are not compatible with main post iteration mechanism, looking for all posts after some post id. Instead, pagination is use. That means:
+
+* If a post is added or removed between pages, some other post could be skipped
+* The can be no more than 750 pages or 750*320 = 240'000 posts
+
+No skip is guaranteed only for first page, that is first 320 posts.
+
 ## Section [Defaults]
 
 This section sets default values for all search groups and for prefilter. Default values can be set for this search group optinons:
@@ -201,6 +305,8 @@ This section sets default values for all search groups and for prefilter. Defaul
 * min_score
 * min_favs
 * post_source
+* max_downloads
+* format
 
 See details on every option in _Search Group Keys, Values, and Descriptions_.
 
@@ -212,16 +318,16 @@ This section have only one option, `tags`, an essentially every tags from here a
 
 Settings for e621dl. All settings are boolean values that accept `true` or `false`.
 
-Name               |       Description
--------------------|-----------------------------
-include_md5        | If `true`, files in folder will look like {id}.{md5}.{ext}. Otherwise, it will look line {id}.{ext} . As of e621dl 5.0.0, deduplication will not work if this value changed after some files are dowloaded  between new and old files. In short, please don't change this after something was downloaded.
-make_hardlinks     | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created.
-make_cache         | If `true`, every downloaded file will be hardlinked/copied to `cache` folder.
-db                 | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created.
+| Name           | Description                                                  |
+| -------------- | ------------------------------------------------------------ |
+| include_md5    | Changed in e621dl 5.4.0. If `true`, and format field in [defaults] is not set, default format became id.md5.id.ext instead of id.ext. This way you can deduplicate files and see md5 in a filename |
+| make_hardlinks | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
+| make_cache     | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
+| db             | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
 
 Default values:
 
-```
+```ini
 [Settings]
 include_md5 = false
 make_hardlinks = true
@@ -233,7 +339,7 @@ db = true
 
 If this section exists, filters from here will be used as first step filtering, and search string from here will be the only string to request from either API or DB. Here is an example:
 
-```
+```ini
 [Prefilter]
 tags = ~cat ~dog ~parrot ~owl
 
@@ -283,6 +389,12 @@ Once you have added at least one group to the tags file, you should see somethin
 ```
 
 Only posts that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
+
+Note that if e621dl started with double click, its windows closes by itself on exit. This is mostly because of some coding shortcuts and because it would be hard to automate it otherwise. If you want for windows to continue after all downloads, you can use `e621_noclose.bat` in Windows, or run it from console directly on any OS.
+
+# Cloudflare Recaptcha
+
+If for some reason Cloudflare thinks your IP is potentially DDOS'ing you, use this instruction to solve a captcha: [Cloudflare solution](Cloudflare.md)
 
 # Automation of **e621dl**
 

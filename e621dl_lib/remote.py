@@ -6,7 +6,9 @@ from functools import lru_cache
 import sqlite3
 import pickle
 import re
+from html import unescape
 from urllib.parse import urlparse
+import json
 
 # Personal Imports
 from . import constants
@@ -17,14 +19,19 @@ from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
 
 class Post:
-    __slots__=['id','tags','rating','id','md5','file_ext','file_url','score','fav_count','days_ago']
+    __slots__ = constants.DEFAULT_SLOTS
     def __init__(self, attrs, metatags):
         for key, value in attrs.items():
+            if key == 'artist':
+                value='_'.join(unescape(value))
             if key in self.__slots__:
                 setattr(self, key, value)
 
         self.days_ago=(datetime.now()-datetime.fromtimestamp(attrs['created_at']['s'])).days
         self.tags = self.tags.split() + metatags
+        
+    def generate(self):
+        return {name:getattr(self,name,'Unknown') for name in self.__slots__}
 
 def make_posts_list(json_list, metatags):
     post_list=[]
@@ -178,6 +185,14 @@ def get_posts(last_id, search_tags, earliest_date, session, **dummy):
     while True:
         start = time()
         response = session.post(url, data = payload)
+        
+        while check_cloudflare(response):
+            solve_captcha(session, response)
+            elapsed = time() - start
+            if elapsed < 1.0:
+                sleep(1.0 - elapsed)
+            response = session.post(url, data = payload)
+        
         response.raise_for_status()
 
         results=make_posts_list(response.json(), metatags)
@@ -297,7 +312,8 @@ def download_post(url, path, session, cachefunc, duplicate_func):
         newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
         os.rename(path, newpath)
         if cachefunc:
-            duplicate_func(newpath, f"cache/{os.path.basename(newpath)}")
+            cachepath='.'.join(newpath.split('.')[-2:])
+            duplicate_func(newpath, f"cache/{cachepath}")
         return True
 
     else:

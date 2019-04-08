@@ -48,21 +48,25 @@ def process_results(results, whitelist, blacklist, anylist, cond_func, ratings, 
             filtered_results.append(post)
     return filtered_results
 
-def get_files(post, include_md5, directory, files, session, cachefunc, duplicate_func):
-    filename = (f'{post.id}.{post.md5}.{post.file_ext}' if include_md5
-                else f'{post.id}.{post.file_ext}')
-    path = local.make_path(directory, filename)
+def get_files(post, format, directory, files, session, cachefunc, duplicate_func):
+    if format:
+        filename = (format + '.{id}.{file_ext}').format(**post.generate())
+    else:
+        filename = f'{post.id}.{post.file_ext}'
     
+    
+    file_id=post.id
+    path = local.make_path(directory, filename)
+
     if os.path.isfile(path):
         return
-
-    elif filename in files:
-        duplicate_func(files[filename], path)
+    elif file_id in files:
+        duplicate_func(files[file_id], path)
         return
     else:
         print(f"[+] Post {post.id} is being downloaded.")
         if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
-            files[filename]=path
+            files[file_id]=path
 
 #@profile
 def prefilter_build_index(kwargses, use_db):
@@ -111,6 +115,7 @@ def prefilter_build_index(kwargses, use_db):
 #@profile
 def main():
     # Create the requests session that will be used throughout the run.
+    
     local.save_on_exit_events(download_queue.save)
     with remote.requests_retry_session() as session:
         # Set the user-agent. Requirements are specified at https://e621.net/help/show/api#basics.
@@ -136,6 +141,7 @@ def main():
         default_favs = 0
         default_ratings = ['s'] # Allow only safe posts to be downloaded.
         default_posts_limit = float('inf')
+        default_format = ''
         
         duplicate_func = copy
         cachefunc = None
@@ -157,7 +163,7 @@ def main():
                 for option, value in config.items(section):
                     if option.lower() == 'include_md5':
                         if value.lower() == 'true':
-                            include_md5 = True
+                            include_md5 =  True
                     elif option.lower() == 'make_hardlinks':
                         if value.lower() == 'true':
                             duplicate_func = os.link
@@ -188,7 +194,12 @@ def main():
                     elif option.lower() in {'ratings', 'rating'}:
                         default_ratings = value.replace(',', ' ').lower().strip().split()
                     elif option.lower() in {'limit', 'max_downloads', 'posts_limit', 'files_limit'}:
-                        default_posts_limit = int(value)
+                        if value.lower() != 'inf':
+                            default_posts_limit = int(value)
+                        else:
+                            default_posts_limit = float('inf')
+                    elif option.lower() in {'format', 'default_format'}:
+                        default_format = value.strip()
                     elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from','post_func', 'post_source'}:
                         if value.lower() in {'db','database','local'}:
                             default_gen_func=storage.gen
@@ -200,6 +211,10 @@ def main():
                 for option, value in config.items(section):
                     if option.lower() in {'tags', 'tag'}:
                         blacklist = [remote.get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+
+        # Making use of include_md5
+        if include_md5 and len(default_format) == 0:
+            default_format = '{id}.{md5}'
 
         # If the section name is not one of the above, it is assumed to be the values for a search.
         # two for cycles in case of e.g 'blacklist' is in the end of a config file 
@@ -223,6 +238,7 @@ def main():
                 section_gen_func = default_gen_func
                 section_append_func = default_append_func
                 section_post_limit = default_posts_limit
+                section_format = default_format
 
                 # Go through each option within the section to find search related values.
                 for option, value in config.items(section):
@@ -249,11 +265,17 @@ def main():
                     elif option.lower() in {'ratings', 'rating'}:
                         section_ratings = value.replace(',', ' ').lower().strip().split()
                     elif option.lower() in {'limit', 'max_downloads', 'posts_limit', 'files_limit'}:
-                        section_post_limit = int(value)
+                        if value.lower() != 'inf':
+                            section_post_limit = int(value)
+                        else:
+                            section_post_limit = float('inf')
+                    elif option.lower() in {'format', 'default_format'}:
+                        section_format = value.strip()
                     elif option.lower() in {'condition', 'conditions'}:
-                        source_template, tags = local.tags_and_source_template(value.lower().strip())
-                        tags = [remote.get_tag_alias(tag.lower(), session) for tag in tags]
-                        section_cond_func = local.make_check_funk(source_template, tags)
+                        if value.lower().strip():
+                            source_template, tags = local.tags_and_source_template(value.lower().strip())
+                            tags = [remote.get_tag_alias(tag.lower(), session) for tag in tags]
+                            section_cond_func = local.make_check_funk(source_template, tags)
                     elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from','post_func', 'post_source'}:
                         if value.lower() in {'db','database','local'}:
                             section_gen_func=storage.gen
@@ -286,6 +308,7 @@ def main():
                                  'gen_funcs': section_gen_func,
                                  'append_func': section_append_func,
                                  'posts_countdown': section_post_limit,
+                                 'format':section_format,
                                  'session'  : session}
                 if section.lower() == 'prefilter':
                     prefilter=section_dict
@@ -302,7 +325,6 @@ def main():
         print('')
         print("[i] Building downloaded files dict...")
         files = local.get_files_dict(bool(cachefunc)) 
-
         
         
         if prefilter:
@@ -330,6 +352,7 @@ def main():
             for search in searches:
                 # Sets up a loop that will continue indefinitely until the last post of a search has been found.
                 directory = search['directory']
+                format = search['format']
                 if chunk_directory.lower() not in (directory.lower(), 'prefilter'):
                     continue
 
@@ -341,7 +364,7 @@ def main():
                         break
                         
                     futures.append(download_pool.submit(get_files,
-                        post,include_md5, directory, files,
+                        post, format, directory, files,
                         session, cachefunc, duplicate_func))
                     
                     search['posts_countdown'] -= 1
