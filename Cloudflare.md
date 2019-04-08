@@ -6,7 +6,7 @@ First, you have to install Referer Control for your browser
 
 [Refere Control for Firefox](https://addons.mozilla.org/en-US/firefox/addon/referercontrol/)
 
-![Referer Control Settings](D:\perfect\programs\e621dl.git\pics\refcontrolsettings.png)
+![Referer Control Settings](pics/refcontrolsettings.png)
 
 For copypaste:
 
