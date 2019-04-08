@@ -31,5 +31,5 @@ So you open `https://www.google.com/recaptcha/api/fallback?k=DigitsAndLettersAsA
 Here is text you'll get for your trouble:
 ![Recaptcha confirmation text](pics/recaptchasolved.png)
 
-After you copy it and if all is fine, e621dl should work as usual:
+After you copy it and press `Enter` if all is fine, e621dl should work as usual:
 ![Cloudflare is satisfied](pics/allisgood.png)
