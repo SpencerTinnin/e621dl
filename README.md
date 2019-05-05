@@ -283,7 +283,7 @@ Following fields are supported:
 
 Notes:
 
-* author is uploader's username, not artist's name. Use artist for that. creator_id 
+* author is uploader's username, not artist's name. Use artist for that
 * creator_id is id of uploader, not artist
 
 There may be more supported fields in the future, but I don't promise anything unless you create a feature request in [Issues](https://github.com/lurkbbs/e621dl/issues).

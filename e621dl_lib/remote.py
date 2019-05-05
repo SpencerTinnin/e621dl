@@ -312,7 +312,8 @@ def download_post(url, path, session, cachefunc, duplicate_func):
         newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
         os.rename(path, newpath)
         if cachefunc:
-            cachepath='.'.join(newpath.split('.')[-2:])
+            basename=os.path.basename(newpath)
+            cachepath='.'.join(basename.split('.')[-2:])
             duplicate_func(newpath, f"cache/{cachepath}")
         return True
 
