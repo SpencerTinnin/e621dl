@@ -329,6 +329,6 @@ def finish_partial_downloads(session, cachefunc, duplicate_func):
                 print(f"[!] Partial download {file} found.")
 
                 path = os.path.join(root, file)
-                url = get_known_post(file.split('.')[0], session)['file_url']
+                url = get_known_post(file.split('.')[-3], session)['file_url']
 
                 download_post(url, path, session, cachefunc, duplicate_func)
