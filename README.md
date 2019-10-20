@@ -20,10 +20,10 @@ Main features of this fork:
 - You can use `~`, `-` and `*` wildcards for every tags, not only first five. Be aware, only firs five can reduce number of requests to e621 API.
 - You can use **advanced boolean conditions** for further filtering.
 - You can cache all files downloaded before to cache folder. This is default behavior, actually.
-- You can store all posts info from API to local database. This also default behavior.
+- You can store all posts info from API to local database. This is also default behavior.
 - You can use said database as source of file link and filtered data instead of API. Combined with cache and deduplication, you can recreate downloads folder at any time with different filters. One limitation is you cannot use metatags with database search.
 - You can use one API or DB prefilter to iterate over posts, with other searches using prefiltered results. Limitation is you cannot use metatags anywhere except for prefilter.
-- **Cloudflare captcha support**. Note: this is not captcha bypass, you're still need to solve it in a browser with special addon, launched from the same IP address with e621dl.
+- [**Cloudflare captcha support**](Cloudflare.md) Note: this is not captcha bypass, you're still need to solve it in a browser with special addon, launched from the same IP address with e621dl.
 
 # Installing and Setting Up **e621dl**
 
@@ -33,7 +33,7 @@ Main features of this fork:
 
 - Download and install [the latest release of Python 3](https://www.python.org/downloads/release/python-3).
     - Make sure you check ":ballot_box_with_check: Add to PATH" on Windows during installation.
-- Open admin command line and type `pip install requests`
+- Open admin command line and type `pip install requests colorama`
 - Download [the latest *source* release of **e621dl**](https://github.com/lurkbbs/e621dl/releases).
     - Decompress the archive into any directory you would like.
 
@@ -50,28 +50,37 @@ You must install all of this program's python dependencies for it to run properl
 
 The required packages for **e621dl** are currently:
 - [requests](https://python-requests.org)
+- [colorama](https://github.com/tartley/colorama)
 
 Open your command shell in the directory you decompressed e621dl into, and run the command `py e621dl.py`. Depending on your system, the command `py` may default to Python 2. In this case you should run `py -3 e621dl.py`. Sometimes, your system may not recognize the `py` command at all. In this case you should run `python3 e621dl.py`. In some cases where Python 3 was the first installed version of Python, the command `python e621dl.py` will be used. On Windows, if you associated python with *.py files during python installation, you can just double click on e621.py or in commandline enter `e621dl.py`.
 
 The most common error that occurs when running a Python 3 program in Python 2 is `SyntaxError: Missing parentheses in call to 'print'`.
 
+## For Windows 10 users
+
+If you want to use hardlinks without admin rights, you can enable "Developer mode" this way
+
+Settings > Update & Security > For Developers and select "Developer mode". Details about Developer Mode can be found [here](https://www.howtogeek.com/292914/what-is-developer-mode-in-windows-10/).
+
 ## First Run
 
-The first time you run **e621dl**, you will see the following errors:
+The first time you run **e621dl**, you will see the following:
 
 ```
-[i] Running e621dl version 5.0.0.
-
-[i] Parsing config...
-[!] No config file found.
-[i] New default config file created. Please add tag groups to this file.'
+status: Just starting
+checked tag: None so far
+posts so far: None so far
+last file downloaded: None so far
+current section: None so far
+last warning: None so far
+[!] New default config file created. Please add tag groups to this file.
 ```
 
-These errors are normal behavior for a first run, and should not raise any alarm. **e621dl** is telling you that it was unable to find a `config.ini` file, so a generic one was created.
+This is normal behavior for a first run, and should not raise any alarm. **e621dl** is telling you that it was unable to find a `config.ini` file, so a generic one was created.
 
 ## Add search groups to the config file.
 
-Create sections in the `config.ini` to specify which posts you would like to download. In the default config file, an example is provided for you. This example is replicated below. Each section will have its own directory inside the downloads folder.
+Create sections in the `config.ini` to specify which posts you would like to download. In the default config file, an example is provided for you. This example is replicated below. Each section will have its own directory inside the downloads folder. `;` is just a comment symbol
 
 ```ini
 ;;;;;;;;;;;;;;
@@ -92,8 +101,7 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;min_favs = 0
 ;ratings = s
 ;max_downloads = inf
-;post_from = api
-;max_downloads = 12
+;post_from = api ;db is for saved database
 ;format = 
 
 ;This is a special prefiltration section.
@@ -108,7 +116,7 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;condition = 
 
 ;[Blacklist]
-;tags = yaoi
+;tags = invalid_tag
 
 ;;;;;;;;;;;;;;;;;;;
 ;; SEARCH GROUPS ;;
@@ -198,9 +206,42 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; [Formatted Cat]
 ; tags = cat
 ; format = {artist}
+
+; This can be used as a subfolder for 
+; a subcategory, details in next section.
+; '*' means "don't download this section"
+; and it's optional to make subcategory
+; beside "tag" option you can use
+; "condition", "days", "ratings",
+; "min_score", "min_favs"
+;
+; Example:
+; [*wide_eyed_subcat]
+; tags = wide_eyed
+
+; Watch closely
+; If any post has tag "cat" and also
+; corresponds to subcategory
+; (has "wide_eyed" tag in our case), than
+; it will be downloaded only in subfolder,
+; in "cat_with_subfolder/wide_eyed_subcat"
+; in our case.
+; If there are more than one
+; subcategory post corresponds to,
+; it will be saved in each one.
+; If post is not corresponds with any of
+; subcategories, it will be stored in original
+; folder, "cat_with_subfolder" in our case.
+;
+; Example:
+; [cat_with_subfolder]
+; tags = cat
+; subfolders = wide_eyed_subcat
 ```
 
-The following characters are not allowed in search group names: `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, `/` as they can cause issues in windows file directories. If any of these characters are used, they will be replaced with the `_` character.
+The following characters are not allowed in search group names: `:`,  `?`, `"`, `<`, `>`, `|`, as they can cause issues in windows file directories. If any of these characters are used, they will be replaced with the `_` character.
+
+`*` Can be used at the start of a group name to disable its downloading. Useful to skip group for one time and to create subcategory. If an asterisk is in any other part of a group name, it is replaced with `_` in the folder name. Note: you cannot disable `prefilter` section with `*`.
 
 These characters are folder separators: `\` `/`. Use them to create subfolders inside a folder inside `downloads`, for e.g. collection sorting.
 
@@ -210,19 +251,20 @@ One side effect of the workaround used to search an unlimited number tags is tha
 
 ### Search Group Keys, Values, and Descriptions
 
-| Key           | Acceptable Values               | Description                                                  |
-| ------------- | ------------------------------- | ------------------------------------------------------------ |
-| []            | Nearly Anything                 | The search group name which will be used to title console output and name folders. See above for restrictions. |
-| days          | Integer from `1` to ∞           | How many days into the past to check for new posts.          |
-| ratings       | Characters `s`, `q`, and/or `e` | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
-| min_score     | Integer from -∞ to ∞            | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
-| min_favs      | Integer from 0 to ∞             | Same as _min_score_, but for favorites.                      |
-| tags          | Nearly Anything                 | Tags which will be used to perform the post search. See above for restrictions. |
-| blacklisted   | Nearly Anything                 | Essentially the same as _-tags_ at the and of a tag list.    |
-| post_source   | `api` or `db`                   | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
-| condition     | Nearly Anything                 | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
-| max_downloads | Integer from `1` to ∞           | Limits number of downloaded posts in addition to time of upload. |
-| format        | see below                       | Allows to format filename beside id.extension. See below for details |
+| Key           | Acceptable Values                   | Description                                                  |
+| ------------- | ----------------------------------- | ------------------------------------------------------------ |
+| []            | Nearly Anything                     | The search group name which will be used to title console output and name folders. See above for restrictions. |
+| days          | Integer from `1` to ∞               | How many days into the past to check for new posts.          |
+| ratings       | Characters `s`, `q`, and/or `e`     | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
+| min_score     | Integer from -∞ to ∞                | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
+| min_favs      | Integer from 0 to ∞                 | Same as _min_score_, but for favorites.                      |
+| tags          | Nearly Anything                     | Tags which will be used to perform the post search. See above for restrictions. |
+| blacklisted   | Nearly Anything                     | Essentially the same as _-tags_ at the and of a tag list.    |
+| post_source   | `api` or `db`                       | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
+| condition     | Nearly Anything                     | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
+| max_downloads | Integer from `1` to ∞               | Limits number of downloaded posts in addition to time of upload. |
+| format        | see below                           | Allows to format filename beside id.extension. See below for details |
+| subfolders    | search group names, space separated | all posts that correspond to searches in the subfolder and to current search are placed in the subfolder and not in main folder. See below for details |
 
 ### Conditions
 
@@ -297,6 +339,261 @@ Metatags like `order:score` and other `order:smth` are not compatible with main 
 
 No skip is guaranteed only for first page, that is first 320 posts.
 
+### Subfolders option
+
+Let me demonstrate how it works with some examples.
+
+First, what if we wanted to all `unknown_artist` images to be in separate folder.
+
+```ini
+;;;;;;;;;;;;;;
+;; GENERAL  ;;
+;;;;;;;;;;;;;;
+
+[Settings]
+include_md5 = false
+make_hardlinks = true
+make_cache = true
+db = true
+
+;{artists} means filenames will be like
+;artist1_artist2.<post id>.jpg
+[Defaults]
+days = 100
+ratings = s
+format = {artist}
+
+;;;;;;;;;;;;;;;;;;;
+;; SEARCH GROUPS ;;
+;;;;;;;;;;;;;;;;;;;
+
+; For now, there should be no spaces in
+; subcategory name
+[*Unknows_Artist]
+tag = unknown_artist
+
+[Cats]
+tags = cat
+subfolders = Unknows_Artist
+
+[Dogs]
+tags = dog
+subfolders = Unknows_Artist
+
+[Wolves]
+tags = wolf
+subfolders = Unknows_Artist
+```
+
+For every folder, subfolder `Unknows_Artist` will be created and all images without known artist will be placed there. So, we will have folder tree like this:
+
+```
+Downloads
+|
+|-- Cats
+|   |
+|   |-- Unknows_Artist
+|
+|-- Dogs
+|   |
+|   |-- Unknows_Artist
+|
+|-- Wolves
+    |
+    |-- Unknows_Artist
+```
+
+Alternatively, we can add subcategory to `Defaults`
+
+```ini
+[Defaults]
+days = 100
+ratings = s
+format = {artist}
+subfolders = Unknows_Artist
+
+;;;;;;;;;;;;;;;;;;;
+;; SEARCH GROUPS ;;
+;;;;;;;;;;;;;;;;;;;
+
+; For now, there should be no spaces in
+; subcategory name
+[*Unknows_Artist]
+tag = unknown_artist
+
+[Cats]
+tags = cat
+
+[Dogs]
+tags = dog
+
+[Wolves]
+tags = wolf
+```
+
+Result will be the same
+
+Now what about two subcategories. Say, `unknown_artist` and `dragon`
+
+```ini
+[*Unknows_Artist]
+tag = unknown_artist
+
+[*Dragons]
+tag = dragon
+
+[Cats]
+tags = cat
+subfolders = Unknows_Artist Dragons
+
+[Dogs]
+tags = dog
+subfolders = Unknows_Artist Dragons
+
+[Wolves]
+tags = wolf
+subfolders = Unknows_Artist Dragons
+```
+
+For now, there is unintuitive behavior with Defaults and two+ subcategories
+
+```ini
+[Defaults]
+days = 100
+ratings = s
+format = {artist}
+subfolders = Unknows_Artist Dragons
+
+;;;;;;;;;;;;;;;;;;;
+;; SEARCH GROUPS ;;
+;;;;;;;;;;;;;;;;;;;
+
+; For now, there should be no spaces in
+; subcategory name
+[*Unknows_Artist]
+tag = unknown_artist
+
+[*Dragons]
+tag = dragon
+
+[Cats]
+tags = cat
+
+[Dogs]
+tags = dog
+
+[Wolves]
+tags = wolf
+```
+
+will lead to 
+
+```
+Downloads
+|
+|-- Cats
+|   |
+|   |-- Unknows_Artist
+|   |    |
+|   |    |-- Dragons
+|   |
+|   |-- Dragons
+|       |
+|       |-- Unknows_Artist
+|
+|-- Dogs
+|   |
+|   |-- Unknows_Artist
+|   |    |
+|   |    |-- Dragons
+|   |
+|   |-- Dragons
+|       |
+|       |-- Unknows_Artist
+|
+|-- Wolves
+    |
+    |-- Unknows_Artist
+    |    |
+    |    |-- Dragons
+    |
+    |-- Dragons
+        |
+        |-- Unknows_Artist
+```
+
+If have some issue with that, post it [here]( https://github.com/lurkbbs/e621dl/issues ). If not, I'll leave it like this for now.
+
+Also, you can make a subcategory inside of another subcategory. And you can make an empty subcategory, like this
+
+```ini
+[*Monster_Rancher]
+tags = monster_rancher
+
+[*Pokemon]
+tags = pokémon
+
+[*Digimon]
+tags = digimon
+
+; Note: nothing except subfolder should be
+; in an empty subcategory
+[*Mons]
+subfolders = Monster_Rancher Pokemon Digimon
+
+[Cats]
+tags = cat
+subfolders = Mons
+
+[Dogs]
+tags = dog
+subfolders = Mons
+
+[Wolves]
+tags = wolf
+subfolders = Mons
+```
+
+This will give us
+
+```
+Downloads
+|
+|-- Cats
+|   |
+|   |-- Mons (should be empty)
+|        |
+|        |-- Pokemon
+|        |
+|        |-- Monster_Rancher
+|        |
+|        |-- Pokemon
+|    
+|-- Dogs
+|   |
+|   |-- Mons (should be empty)
+|        |
+|        |-- Pokemon
+|        |
+|        |-- Monster_Rancher
+|        |
+|        |-- Pokemon
+|    
+|-- Wolves
+    |
+    |-- Mons (should be empty)
+         |
+         |-- Pokemon
+         |
+         |-- Monster_Rancher
+         |
+         |-- Pokemon
+```
+
+
+
+
+
 ## Section [Defaults]
 
 This section sets default values for all search groups and for prefilter. Default values can be set for this search group optinons:
@@ -356,49 +653,46 @@ tags = parrot
 tags = owl
 ```
 
-This way we will iterate over both tags without redundant overlapping for every tag search string.
+This way we will iterate over all four tags without redundant overlapping for every tag search string.
 
-Prefilter has exactly the same parameters as regular searches, but days are actually maximum days of all searches.
+Prefilter has exactly the same parameters as regular searches, but days are actually maximum days of all searches. Another limitation is metatags are not supported outside of prefilter section.
 
 ## Normal Operation
 
 Once you have added at least one group to the tags file, you should see something similar to this when you run **e621dl**:
 
 ```
-[i] Running e621dl version 5.0.0.
-
-[i] Parsing config...
-[i] config.ini changed, resetting saved queue
-[+] The tag cat is valid.
-[+] The tag dog is valid.
-[+] The tag parrot is valid.
-[+] The tag owl is valid.
-
-[i] Checking for partial downloads...
-
-[i] Building downloaded files dict...
-
-[i] getting tags for Prefilter
-[+] Post {id1} is being downloaded.
-[+] Post {id2} is being downloaded.
-[+] Post {id3} is being downloaded.
-.......................................
-[+] Post {id_last} is being downloaded.
-
-[+] All searches complete. Press ENTER to exit...
+status : Just starting
+checked tag : None so far
+posts so far : None so far
+last file downloaded : None so far
+current section : None so far
+last warning : None so far
 ```
 
-Only posts that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
+Status shows what's going on, that is if config is being parsed or if tags are checked or files are being downloaded, things like those.
+
+Checked tag shows which tag is checked for validity. It will be set to `all tags are valid` after check completion.
+
+Posts so far shows how many posts are processed from api so far. Mostly here to show that the app is still working. It can lag a bit if a lot of new files are in download queue.
+
+Last file downloaded shows what file has just been downloaded and where. Only files that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
+
+Current section shows which search group is processed now. If you use `prefilter`, only `prefilter` should be here.
+
+Last warning shows last non-critical info and is mostly for troubleshooting.
+
+
 
 Note that if e621dl started with double click, its windows closes by itself on exit. This is mostly because of some coding shortcuts and because it would be hard to automate it otherwise. If you want for windows to continue after all downloads, you can use `e621_noclose.bat` in Windows, or run it from console directly on any OS.
 
 # Cloudflare Recaptcha
 
-If for some reason Cloudflare thinks your IP is potentially DDOS'ing you, use this instruction to solve a captcha: [Cloudflare solution](Cloudflare.md)
+If for some reason Cloudflare thinks your IP is DDOS'ing e621, use this instruction to solve a captcha: [Cloudflare solution](Cloudflare.md)
 
 # Automation of **e621dl**
 
-It should be recognized that **e621dl**, as a script, can be scheduled to run as often as you like, keeping the your local collections always up-to-date, however, the methods for doing this are dependent on your platform, and are outside the scope of this quick-guide.
+It should be recognized that **e621dl**, as a script, can be scheduled to run as often as you like, keeping the your local collections always up-to-date, however, methods for doing so are dependent on your platform, and are outside the scope of this quick-guide.
 
 # Feedback and Requests
 

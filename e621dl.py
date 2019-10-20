@@ -20,54 +20,90 @@ download_queue = local.DownloadQueue()
 
 storage = local.PostsStorage()
 
-#TODO: prefilter countdown
 
-def process_results(results, whitelist, blacklist, anylist, cond_func, ratings, min_score, min_favs, days_ago, **dummy):
+def default_condition(x):
+    return True
+
+def has_actual_search(whitelist, blacklist, anylist, cond_func, **dummy):
+    return whitelist or blacklist or anylist or cond_func != default_condition
+    
+
+def process_result(post, whitelist, blacklist, anylist, cond_func, ratings, min_score, min_favs, days_ago, **dummy):
+    tags = post.tags
+    if whitelist and not all( any(reg.fullmatch(tag) for tag in tags) for reg in whitelist ):
+        return []
+    elif blacklist and any( any(reg.fullmatch(tag) for tag in tags) for reg in blacklist ):
+        return []
+    elif anylist and not any(any(reg.fullmatch(tag) for tag in tags) for reg in anylist):
+        return []
+    elif not cond_func(set(tags)):
+        return []
+    elif post.rating not in ratings:
+        return []
+    elif int(post.score) < min_score:
+        return []
+    elif int(post.fav_count) < min_favs:
+        return []
+    elif post.days_ago >= days_ago:
+        return []   
+    else:
+        return [post]
+        
+
+def process_results(results, **dummy):
     filtered_results=[]
 
     for post in results:
-        tags = post.tags
-        if whitelist and not all( any(reg.fullmatch(tag) for tag in tags) for reg in whitelist ):
-            continue
-        elif blacklist and any( any(reg.fullmatch(tag) for tag in tags) for reg in blacklist ):
-            continue
-        elif anylist and not any(any(reg.fullmatch(tag) for tag in tags) for reg in anylist):
-            continue
-        elif not cond_func(set(tags)):
-            continue
-        elif post.rating not in ratings:
-            continue
-        elif int(post.score) < min_score:
-            continue
-        elif int(post.fav_count) < min_favs:
-            continue
-        elif post.days_ago >= days_ago:
-            continue    
-        else:
-            #print('really')
-            filtered_results.append(post)
+        filtered_results += process_result(post, **dummy)
+        
     return filtered_results
 
-def get_files(post, format, directory, files, session, cachefunc, duplicate_func):
+#TODO: describe how this all works. God this is not intuitive
+def get_directories(post, root_dirs, search, searches_dict):
+    subdirectories = search['subdirectories']
+    
+    if not subdirectories:
+        return ['/'.join(root_dirs)]
+    
+    results = []
+    for directory in subdirectories:
+        #preventing recursions in cases like cat/dog/cat/dog/...
+        if directory in root_dirs:
+            continue
+        if process_result(post, **searches_dict[directory]):
+            results += get_directories(post, root_dirs + [directory], searches_dict[directory], searches_dict)
+            
+    # if no results for subdirectories found
+    # and current directory has some conditions to search
+    # we place file here
+    if not results and has_actual_search(**search):
+        return ['/'.join(root_dirs)]
+    else:
+        return results
+    
+
+def get_files(post, format, root_dir, files, session, cachefunc, duplicate_func, search, searches_dict):
     if format:
-        filename = (format + '.{id}.{file_ext}').format(**post.generate())
+        id_ext = f'{post.id}.{post.file_ext}'
+        custom_prefix = format.format(**post.generate())[:100]
+        filename = f'{custom_prefix}.{id_ext}'
     else:
         filename = f'{post.id}.{post.file_ext}'
     
     
-    file_id=post.id
-    path = local.make_path(directory, filename)
+    for directory in get_directories(post, [root_dir], search, searches_dict):
+        file_id=post.id
+        path = local.make_path(directory, filename)
 
-    if os.path.isfile(path):
-        return
-    elif file_id in files:
-        duplicate_func(files[file_id], path)
-        return
-    else:
-        print(f"[+] Post {post.id} is being downloaded.")
-        if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
-            files[file_id]=path
-
+        if os.path.isfile(path):
+            continue
+        elif file_id in files:
+            duplicate_func(files[file_id], path)
+            continue
+        else:
+            if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
+                files[file_id]=path
+                
 #@profile
 def prefilter_build_index(kwargses, use_db):
     
@@ -85,12 +121,16 @@ def prefilter_build_index(kwargses, use_db):
 
             directory = kwargs['directory']
             print('')
-            print(f"[i] getting tags for {directory}")            
+            local.printer.change_section(directory)
             gen = kwargs['gen_funcs']
             append_func=kwargs['append_func']
             max_days_ago=kwargs['days_ago']
             
+            results_num = 0
+            
             for results in gen(last_id, **kwargs):
+                results_num += len(results)
+                local.printer.change_post(results_num)
                 append_func(results)
                 filtered_results=process_results(results, **kwargs)
                 download_queue.append( (directory, filtered_results) )
@@ -105,6 +145,7 @@ def prefilter_build_index(kwargses, use_db):
             download_queue.completed_gen(directory)
         download_queue.completed = True
     except:
+        local.printer.show(False)
         print("Exception in api iterator:")
         print_exc()
     finally:
@@ -116,15 +157,14 @@ def prefilter_build_index(kwargses, use_db):
 def main():
     # Create the requests session that will be used throughout the run.
     
+    local.printer.start()
+    
     local.save_on_exit_events(download_queue.save)
     with remote.requests_retry_session() as session:
         # Set the user-agent. Requirements are specified at https://e621.net/help/show/api#basics.
         session.headers['User-Agent'] = f"e621dl (lurkbbs) -- Version {constants.VERSION}"
         
-        print(f"[i] Running e621dl version {constants.VERSION}")
-
-        print('')
-        print("[i] Parsing config...")
+        local.printer.change_status("Parsing config")
 
         config, hash = local.get_config()
         download_queue.check_config_hash(hash)
@@ -132,6 +172,7 @@ def main():
         # Initialize the lists that will be used to filter posts.
         blacklist = []
         searches = []
+        searches_dict = {}
 
         # Initialize user configured options in case any are missing.
         include_md5 = False # The md5 checksum is not appended to file names.
@@ -142,6 +183,7 @@ def main():
         default_ratings = ['s'] # Allow only safe posts to be downloaded.
         default_posts_limit = float('inf')
         default_format = ''
+        default_subdirectories = set()
         
         duplicate_func = copy
         cachefunc = None
@@ -205,7 +247,9 @@ def main():
                             default_gen_func=storage.gen
                             default_append_func = lambda x: None
                             use_db = True
-                        
+                    elif option.lower() in {'subfolder', 'subfolders', 'subdir', 'subdirs', 'subdirectory', 'subdirectories'}:
+                        default_subdirectories.update( value.replace(',', ' ').lower().strip().split() )
+                    
             # Get values from the "Blacklist" section. Tags are aliased to their acknowledged names.
             elif section.lower() == 'blacklist':
                 for option, value in config.items(section):
@@ -219,7 +263,8 @@ def main():
         # If the section name is not one of the above, it is assumed to be the values for a search.
         # two for cycles in case of e.g 'blacklist' is in the end of a config file 
         for section in config.sections():
-            if section.lower() not in {'settings','defaults','blacklist'}:
+            section_id = section.lower().strip()
+            if section_id not in {'settings','defaults','blacklist'}:
 
                 # Initialize the list of tags that will be searched.
                 section_tags = []
@@ -229,7 +274,7 @@ def main():
                 section_score = default_score
                 section_favs = default_favs
                 section_ratings = default_ratings
-                section_cond_func = lambda x: True
+                section_cond_func = default_condition
                 section_blacklist = []
                 section_whitelist = []
                 section_anylist = []
@@ -239,6 +284,7 @@ def main():
                 section_append_func = default_append_func
                 section_post_limit = default_posts_limit
                 section_format = default_format
+                section_subdirectories = set() #default_subdirectories.copy()
 
                 # Go through each option within the section to find search related values.
                 for option, value in config.items(section):
@@ -250,7 +296,8 @@ def main():
                         section_anylist   += [tag[1:] for tag in section_tags if tag[0]=='~']
                         section_whitelist += [tag for tag in section_tags if tag[0] not in ('-','~')]
                         
-
+                    elif option.lower() in {'subfolder', 'subfolders', 'subdir', 'subdirs', 'subdirectory', 'subdirectories'}:
+                        section_subdirectories.update( value.replace(',', ' ').lower().strip().split() )
                     # Overwrite default options if the user has a specific value for the section
                     elif option.lower() in {'days_to_check', 'days'}:
                         section_days_ago=int(value)
@@ -276,7 +323,7 @@ def main():
                             source_template, tags = local.tags_and_source_template(value.lower().strip())
                             tags = [remote.get_tag_alias(tag.lower(), session) for tag in tags]
                             section_cond_func = local.make_check_funk(source_template, tags)
-                    elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from','post_func', 'post_source'}:
+                    elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from', 'post_func', 'post_source'}:
                         if value.lower() in {'db','database','local'}:
                             section_gen_func=storage.gen
                             section_append_func = lambda x: None
@@ -291,10 +338,18 @@ def main():
                 section_blacklist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_blacklist+blacklist+section_blacklisted]
                 section_whitelist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_whitelist]
                 section_anylist = [re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_anylist]
+                
+                if has_actual_search(section_whitelist, section_blacklist, section_anylist, section_cond_func):
+                    section_subdirectories.update(default_subdirectories)
                 # Append the final values that will be used for the specific section to the list of searches.
                 # Note section_tags is a list within a list.
                 
-                section_dict = { 'directory': section.strip(),
+                if section_id[0] == "*":
+                    section_directory = section_id[1:]
+                else:
+                    section_directory = section_id
+                    
+                section_dict = { 'directory': section_directory,
                                  'search_tags': section_search_tags,
                                  'ratings': section_ratings,
                                  'min_score': section_score,
@@ -309,21 +364,22 @@ def main():
                                  'append_func': section_append_func,
                                  'posts_countdown': section_post_limit,
                                  'format':section_format,
+                                 'subdirectories': section_subdirectories,
                                  'session'  : session}
+                
                 if section.lower() == 'prefilter':
                     prefilter=section_dict
                 else:
-                    searches.append(section_dict)
-        
-        
-        
-        print('')
-        print("[i] Checking for partial downloads...")
+                    searches_dict[section_directory] = section_dict
+                    if section_id[0] != "*":
+                        searches.append(section_dict)
+
+        local.printer.change_tag("all tags are valid")
+        local.printer.change_status("Checking for partial downloads")
 
         remote.finish_partial_downloads(session, cachefunc, duplicate_func)
         
-        print('')
-        print("[i] Building downloaded files dict...")
+        local.printer.change_status("Building downloaded files dict")
         files = local.get_files_dict(bool(cachefunc)) 
         
         
@@ -333,6 +389,7 @@ def main():
         else:
             kwargs = [search for search in searches if not download_queue.in_gens(search['directory'])]
 
+        local.printer.change_status("Downloading files")
         queue_thread=Thread(target=prefilter_build_index, args=(kwargs, use_db))
         queue_thread.start()
         
@@ -365,8 +422,10 @@ def main():
                         
                     futures.append(download_pool.submit(get_files,
                         post, format, directory, files,
-                        session, cachefunc, duplicate_func))
+                        session, cachefunc, duplicate_func, search, searches_dict))
                     
+                    # TODO: Make sure that file in download queue
+                    # actually downloaded and only then decrease counter.
                     search['posts_countdown'] -= 1
                     
 
@@ -375,6 +434,8 @@ def main():
                         try:
                             raise future.exception()
                         except: #Pull request a better way
+                            local.printer.show(False)
+                            sleep(0.101)
                             print("Exception during download:")
                             print_exc()
                             download_queue.save()
@@ -387,8 +448,7 @@ def main():
     if download_queue.completed:
         download_queue.reset()
         
-    print('')
-    print("[+] All searches complete. Press ENTER to exit...")
+    local.printer.change_status("All complete")
     raise SystemExit
     
     

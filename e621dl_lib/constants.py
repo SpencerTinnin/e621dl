@@ -1,4 +1,4 @@
-VERSION = '5.4.1'
+VERSION = '5.5.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
@@ -25,8 +25,7 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;min_favs = 0
 ;ratings = s
 ;max_downloads = inf
-;post_from = api
-;max_downloads = 12
+;post_from = api ;db is for saved database
 ;format = 
 
 ;This is a special prefiltration section.
@@ -41,7 +40,7 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;condition = 
 
 ;[Blacklist]
-;tags = yaoi
+;tags = invalid_tag
 
 ;;;;;;;;;;;;;;;;;;;
 ;; SEARCH GROUPS ;;
@@ -132,4 +131,34 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ; tags = cat
 ; format = {artist}
 
+; This can be used as a subfolder for 
+; a subcategory, details in next section.
+; '*' means "don't download this section"
+; and it's optional to make subcategory
+; beside "tag" option you can use
+; "condition", "days", "ratings",
+; "min_score", "min_favs"
+;
+; Example:
+; [*wide_eyed_subcat]
+; tags = wide_eyed
+
+; Watch closely
+; If any post has tag "cat" and also
+; corresponds to subcategory
+; (has "wide_eyed" tag in our case), than
+; it will be downloaded only in subfolder,
+; in "cat_with_subfolder/wide_eyed_subcat"
+; in our case.
+; If there are more than one
+; subcategory post corresponds to,
+; it will be saved in each one.
+; If post is not corresponds with any of
+; subcategories, it will be stored in original
+; folder, "cat_with_subfolder" in our case.
+;
+; Example:
+; [cat_with_subfolder]
+; tags = cat
+; subfolders = wide_eyed_subcat
 '''

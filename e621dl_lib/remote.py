@@ -12,6 +12,7 @@ import json
 
 # Personal Imports
 from . import constants
+from .local import printer
 
 # Vendor Imports
 import requests
@@ -84,29 +85,32 @@ def solve_captcha(session, response):
     try:
         hidden_name, hidden_value = hidden_input_re.search(text).groups()
     except:
-        print("unexpected absense of hidden input")
+        printer.change_warning("unexpected absense of hidden input")
         return False
     
     try:
         textarea_name, = textarea_re.search(text).groups()
     except:
-        print("unexpected absense of textarea")
+        printer.change_warning("unexpected absense of textarea")
         return False
         
     try:
         form_url, form_method = form_re.search(text).groups()
     except:
-        print("unexpected absense of form")
+        printer.change_warning("unexpected absense of form")
         return False
     
     try:
         iframe_url, = iframe_re.search(text).groups()
     except:
-        print("unexpected absense of iframe")
+        printer.change_warning("unexpected absense of iframe")
         return False
     
     form_method = form_method.lower()
     
+    printer.show(False)
+    sleep(0.2)
+    printer.reset_screen()
     print("Install Referer Control extension in your browser, then")
     print("set up (temporarily) referer for 'https://www.google.com/recaptcha/*'")
     print("to 'https://e621.net', then")
@@ -115,6 +119,8 @@ def solve_captcha(session, response):
     print("after successful recaptcha solving")
     print("copy text field content here:")
     textarea_value=input()
+    
+    printer.show()
     
     if form_url[0] == "/":
         form_url = baseurl+form_url
@@ -129,7 +135,7 @@ def solve_captcha(session, response):
     elif form_method == "post":
         response = session.post(form_url, data=payload)
     else:
-        print("unknown method")
+        printer.change_warning("unknown method")
     
     return not check_cloudflare(response) #means we solve a captcha
 
@@ -226,10 +232,6 @@ def get_known_post(post_id, session):
 def get_tag_alias(user_tag, session):
     prefix = ''
     
-    if ':' in user_tag:
-        print(f"[!] It is not possible to check if {user_tag} is valid.")
-        return user_tag
-
     if user_tag[0] == '~':
         prefix = '~'
         user_tag = user_tag[1:]
@@ -240,6 +242,10 @@ def get_tag_alias(user_tag, session):
         user_tag = user_tag[1:]
         return prefix+get_tag_alias(user_tag, session)
 
+    if ':' in user_tag:
+        printer.change_warning(f"Impossible to check if {user_tag} is valid.")
+        return user_tag    
+
     url = 'https://e621.net/tag/index.json'
     payload = {'name': user_tag}
 
@@ -248,13 +254,14 @@ def get_tag_alias(user_tag, session):
 
     results = response.json()
 
+    #if at least one tag was found for tag with "*"
     if '*' in user_tag and results:
-        print(f"[+] The tag {user_tag} is valid.")
+        printer.change_tag(f"{user_tag} is valid.")
         return user_tag
 
     for tag in results:
         if user_tag == tag['name']:
-            print(f"[+] The tag {prefix}{user_tag} is valid.")
+            printer.change_tag(f"{prefix}{user_tag} is valid.")
             return f"{prefix}{user_tag}"
 
     pagenum = 1
@@ -280,13 +287,13 @@ def get_tag_alias(user_tag, session):
 
                 results = response.json()
 
-                print(f"[+] The tag {prefix}{user_tag} was changed to {prefix}{results['name']}.")
+                printer.change_tag(f"{prefix}{user_tag} was changed to {prefix}{results['name']}.")
 
                 return f"{prefix}{results['name']}"
         
         pagenum += 1
         results = alias_chunk()
-
+    printer.show(False)
     print(f"[!] The tag {prefix}{user_tag} is spelled incorrectly or does not exist.")
     raise SystemExit
     return ''
@@ -308,9 +315,9 @@ def download_post(url, path, session, cachefunc, duplicate_func):
         with open(path, 'ab') as outfile:
             for chunk in response.iter_content(chunk_size = 8192):
                 outfile.write(chunk)
-
         newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
         os.rename(path, newpath)
+        printer.change_file(newpath)
         if cachefunc:
             basename=os.path.basename(newpath)
             cachepath='.'.join(basename.split('.')[-2:])
@@ -319,14 +326,14 @@ def download_post(url, path, session, cachefunc, duplicate_func):
 
     else:
         os.remove(path)
-        print(f"[!] The downoad URL {url} is not available. Error code: {response.status_code}.")
+        printer.change_warning(f"Error code {response.status_code} with {url}")
         return False
 
 def finish_partial_downloads(session, cachefunc, duplicate_func):
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
             if file.endswith(constants.PARTIAL_DOWNLOAD_EXT):
-                print(f"[!] Partial download {file} found.")
+                printer.change_warning(f" Partial download {file} found.")
 
                 path = os.path.join(root, file)
                 url = get_known_post(file.split('.')[-3], session)['file_url']

@@ -10,9 +10,71 @@ import pickle
 from time import sleep
 from functools import lru_cache
 import hashlib
+from threading import Thread
+from shutil import get_terminal_size
+
+# External Imports
+import colorama
 
 # Personal Imports
 from . import constants
+
+class StatPrinter(Thread):
+    def __init__(self):
+        super().__init__(daemon=True)
+
+        colorama.init()
+        self.messages = deque()
+        self._show = True
+        
+    def run(self):
+        lines = {'status' : 'Just starting',
+                 'checked tag' : 'None so far',
+                 'posts so far' : 'None so far',
+                 'last file downloaded' : 'None so far',
+                 'current section' : 'None so far',
+                 'last warning' : 'None so far'
+                 }
+        while True:
+            while self.messages:
+                lines.update(self.messages.popleft())
+            
+            if not self._show:
+                sleep(0.5)
+                continue
+                
+            columns = get_terminal_size((80, 20)).columns
+            self.reset_screen()
+            for k,v in lines.items():
+                print(f"{k}: {v}"[:columns])
+            sleep(0.5)
+            
+    def reset_screen(self):
+        print("\033[1J\033[1;1H", end='')
+
+    def change_status(self, text):
+        self.messages.append({'status' : text})
+
+    def change_tag(self, text):
+        self.messages.append({'checked tag' : text})
+    
+    def change_post(self, text):
+        self.messages.append({'posts so far' : text})
+       
+    def change_file(self, text):
+        self.messages.append({'last file downloaded' : text})
+
+    def change_section(self, text):
+        self.messages.append({'current section' : text})
+    
+    def change_warning(self, text):
+        self.messages.append({'last warning' : text})
+    
+    def show(self, val = True):
+        self._show = val
+        
+
+printer = StatPrinter()
 
 class DownloadQueue:
     def __init__(self):
@@ -86,7 +148,7 @@ class DownloadQueue:
         with self._lock:
             if self.config_hash != hash:
                 if self._deque or not self.completed:
-                    print("[i] config.ini changed, resetting saved queue")
+                    printer.change_warning("config.ini changed, resetting saved queue")
                 self.reset()
                 self.config_hash = hash
             
@@ -199,7 +261,7 @@ FORBIDDEN_TAG_CHARS=r'%,#*'
 def tags_and_source_template(line):
     
     if any((c in FORBIDDEN_TAG_CHARS) for c in line):
-        print(f"[-]: characters {FORBIDDEN_TAG_CHARS} are forbidden")
+        printer.change_warning(f"[-]: characters {FORBIDDEN_TAG_CHARS} are forbidden")
     
     line = ' ' + line # anything except '\\' is fine to prepend, actually
     new_line = [' ']
@@ -207,7 +269,7 @@ def tags_and_source_template(line):
     for prev, cur in zip(line[:-1],line[1:]):
         if prev=='\\':
             if cur not in '|&()':
-                print("[!]: only characters '|&()' can be screened")
+                printer.change_warning("[!]: only characters '|&()' can be screened")
                 raise SystemExit
             else:
                 new_line.append(cur)
@@ -217,7 +279,7 @@ def tags_and_source_template(line):
             else:
                 new_line.extend( (' ',cur,' ') )
         elif cur == '~' and new_line[-1]==' ':
-            print("[!]: character '~' cannot be first character")
+            printer.change_warning("[!]: character '~' cannot be first character")
             raise SystemExit
         else:
             new_line.extend( cur )
@@ -238,6 +300,7 @@ def tags_and_source_template(line):
         make_check_funk(source_template, tags)(tags) # syntax validation
     except:
         source_template = source_template.replace("('{}' in tags)","{}")
+        printer.show(False)
         print(f'[!] Error in condition.')
         print(f"[!] Check if all '()|&' characters are properly screened and all braces are closed")
         print(f"[!] See source:\n    {source_template}")
@@ -250,7 +313,8 @@ def tags_and_source_template(line):
 def make_config():
     with open('config.ini', 'wt', encoding = 'utf_8_sig') as outfile:
         outfile.write(constants.DEFAULT_CONFIG_TEXT)
-        print("[i] New default config file created. Please add tag groups to this file.'")
+    printer.show(False)
+    print("[!] New default config file created. Please add tag groups to this file.")
     raise SystemExit
 
 def filehash(filename):
@@ -263,7 +327,7 @@ def get_config():
     config = configparser.ConfigParser()
 
     if not os.path.isfile('config.ini'):
-        print("[!] No config file found.")
+        printer.change_warning("[!] No config file found.")
         make_config()
 
     with open('config.ini', 'rt', encoding = 'utf_8_sig') as infile:
@@ -333,4 +397,4 @@ def validate_format(format):
     try:
         dummy = format.format(**post)
     except:
-        print("Invalid format:", format)
+        printer.change_warning(f"Invalid format: {format}")
