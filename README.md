@@ -19,8 +19,8 @@ Main features of this fork:
 - If you need to stop e621dl, or there was some random error, it will continue search and download right were it stopped. On Windows, you can just close console window. Same for Linux consoles. More specifically for `SIGHUP`,`SIGINT` and `SIGTERM` signals.
 - You can use `~`, `-` and `*` wildcards for every tags, not only first five. Be aware, only firs five can reduce number of requests to e621 API.
 - You can use **advanced boolean conditions** for further filtering.
-- You can cache all files downloaded before to cache folder. This is default behavior, actually.
-- You can store all posts info from API to local database. This is also default behavior.
+- You can cache all files downloaded before to cache folder. This is **not** default behavior.
+- You can store all posts info from API to local database. This is also **not** default behavior.
 - You can use said database as source of file link and filtered data instead of API. Combined with cache and deduplication, you can recreate downloads folder at any time with different filters. One limitation is you cannot use metatags with database search.
 - You can use one API or DB prefilter to iterate over posts, with other searches using prefiltered results. Limitation is you cannot use metatags anywhere except for prefilter.
 - [**Cloudflare captcha support**](Cloudflare.md) Note: this is not captcha bypass, you're still need to solve it in a browser with special addon, launched from the same IP address with e621dl.
