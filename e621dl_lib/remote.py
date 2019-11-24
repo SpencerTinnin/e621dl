@@ -18,6 +18,9 @@ from .local import printer
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
+from requests.exceptions import ConnectionError, ReadTimeout
+
+TIMEOUT = constants.CONNECTION_TIMEOUT
 
 class Post:
     __slots__ = constants.DEFAULT_SLOTS
@@ -59,6 +62,26 @@ def requests_retry_session(
     session.mount('http://', adapter)
     session.mount('https://', adapter)
     return session
+
+
+def retrying_get(s, *args, **kwargs):
+    for i in range(1,100):
+        try:
+            return s.get(*args, **kwargs)
+        except (ConnectionError, ReadTimeout):
+            printer.increment_retries()
+            
+    return s.get(*args, **kwargs)
+    
+    
+def retrying_post(s, *args, **kwargs):
+    for i in range(1,100):
+        try:
+            return s.post(*args, **kwargs)
+        except (ConnectionError, ReadTimeout):
+            printer.increment_retries()
+            
+    return s.post(*args, **kwargs)
 
 def check_cloudflare(response):
     if response.status_code != 403:
@@ -131,9 +154,9 @@ def solve_captcha(session, response):
             }
     
     if form_method == "get":
-        response = session.get(form_url, params=payload)
+        response = retrying_get(session, form_url, params=payload, timeout=TIMEOUT)
     elif form_method == "post":
-        response = session.post(form_url, data=payload)
+        response = retrying_post(session, form_url, data=payload, timeout=TIMEOUT)
     else:
         printer.change_warning("unknown method")
     
@@ -142,7 +165,7 @@ def solve_captcha(session, response):
 def delayed_post(url, payload, session):
     # Take time before and after getting the requests response.
     start = time()
-    response = session.post(url, data = payload)
+    response = retrying_post(session, url, data = payload, timeout=TIMEOUT)
     elapsed = time() - start
 
     # Citation from e621:api
@@ -158,9 +181,9 @@ def delayed_post(url, payload, session):
     return response
 
 def get_github_release(session):
-    url = 'https://api.github.com/repos/wulfre/e621dl/releases/latest'
+    url = 'https://api.github.com/repos/lurkbbs/e621dl/releases/latest'
 
-    response = session.get(url)
+    response = retrying_get(session, url, timeout=TIMEOUT)
     response.raise_for_status()
 
     return response.json()['tag_name'].strip('v')
@@ -190,14 +213,14 @@ def get_posts(last_id, search_tags, earliest_date, session, **dummy):
 
     while True:
         start = time()
-        response = session.post(url, data = payload)
+        response = retrying_post(session, url, data = payload, timeout=TIMEOUT)
         
         while check_cloudflare(response):
             solve_captcha(session, response)
             elapsed = time() - start
             if elapsed < 1.0:
                 sleep(1.0 - elapsed)
-            response = session.post(url, data = payload)
+            response = retrying_post(session, url, data = payload, timeout=TIMEOUT)
         
         response.raise_for_status()
 
@@ -308,27 +331,37 @@ def download_post(url, path, session, cachefunc, duplicate_func):
     except FileExistsError:
         pass
 
-    header = {'Range': f"bytes={os.path.getsize(path)}-"}
-    response = session.get(url, stream = True, headers = header)
+    def stream_download():
+        header = {'Range': f"bytes={os.path.getsize(path)}-"}
+        response = retrying_get(session, url, stream = True, headers = header, timeout=TIMEOUT)
+        
+        if response.ok:    
+            with open(path, 'ab') as outfile:
+                for chunk in response.iter_content(chunk_size = 8192):
+                    outfile.write(chunk)
+            newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
+            os.rename(path, newpath)
+            printer.change_file(newpath)
+            if cachefunc:
+                basename=os.path.basename(newpath)
+                cachepath='.'.join(basename.split('.')[-2:])
+                duplicate_func(newpath, f"cache/{cachepath}")
+            return True
+
+        else:
+            os.remove(path)
+            printer.change_warning(f"Error code {response.status_code} with {url}")
+            return False
+
+    for i in range(1,100):
+        try:
+            return stream_download()
+        except (ConnectionError, ReadTimeout):
+            printer.increment_retries()
+            
+    return stream_download()
     
-    if response.ok:    
-        with open(path, 'ab') as outfile:
-            for chunk in response.iter_content(chunk_size = 8192):
-                outfile.write(chunk)
-        newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
-        os.rename(path, newpath)
-        printer.change_file(newpath)
-        if cachefunc:
-            basename=os.path.basename(newpath)
-            cachepath='.'.join(basename.split('.')[-2:])
-            duplicate_func(newpath, f"cache/{cachepath}")
-        return True
-
-    else:
-        os.remove(path)
-        printer.change_warning(f"Error code {response.status_code} with {url}")
-        return False
-
+    
 def finish_partial_downloads(session, cachefunc, duplicate_func):
     for root, dirs, files in os.walk('downloads/'):
         for file in files:

@@ -15,7 +15,7 @@ Once it knows these things, it goes through the searches one by one, and downloa
 
 Main features of this fork:
 - Search requests and file downloads work _in parallel_, so you do not need to wait file downloads to get new portion of tags to filter.
-- **Duplicate** files are not downloaded again, they either copied or **hardlinked** from existing files. Think of _hardlink_ as of _another name and path for the same file_. That means hardlinks cannot be used across different disks, and if you change content in one hardlink, it will stay changed in another. But they take about zero space. This default option for duplicates, there is a settings to use plain file copy.
+- **Duplicates** are not downloaded again, they either copied or **hardlinked** from existing files. Think of _hardlink_ as of _another name and path for the same file_. That means hardlinks cannot be used across different disks, and if you change content in one hardlink, it will stay changed in another. But they take about zero space. Since on Windows you have to be admin or enable Developer Mode (Win10 only), this **option is disabled by default**. To enable it, add `make_hardlinks = true` to `[Settings]` and be sure either Developer Mode is enabled or that the app runs with admin privilege.
 - If you need to stop e621dl, or there was some random error, it will continue search and download right were it stopped. On Windows, you can just close console window. Same for Linux consoles. More specifically for `SIGHUP`,`SIGINT` and `SIGTERM` signals.
 - You can use `~`, `-` and `*` wildcards for every tags, not only first five. Be aware, only firs five can reduce number of requests to e621 API.
 - You can use **advanced boolean conditions** for further filtering.
@@ -24,6 +24,10 @@ Main features of this fork:
 - You can use said database as source of file link and filtered data instead of API. Combined with cache and deduplication, you can recreate downloads folder at any time with different filters. One limitation is you cannot use metatags with database search.
 - You can use one API or DB prefilter to iterate over posts, with other searches using prefiltered results. Limitation is you cannot use metatags anywhere except for prefilter.
 - [**Cloudflare captcha support**](Cloudflare.md) Note: this is not captcha bypass, you're still need to solve it in a browser with special addon, launched from the same IP address with e621dl.
+- **Improved connection stability**. You can plug and unplug network cable and e621dl will continue as if nothing happened.
+- Max downloaded files per section limit. You can download only, say, 100 last files.
+- **`order:` metatag family support**. With max downloads limit you can get e.g. top 10 most rated or top 25 least favorite.
+- **Multithreaded**. 
 
 # Installing and Setting Up **e621dl**
 
@@ -90,9 +94,9 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;These are default values
 ;[Settings]
 ;include_md5 = false
-;make_hardlinks = false
-;make_cache = false
-;db = false
+;make_hardlinks = true
+;make_cache = true
+;db = true
 
 ;These are default settings for all search groups below
 ;[Defaults]
@@ -112,6 +116,20 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;Mostly useful if you have a lot of searches
 ;that all have something in common.
 ;[Prefilter]
+;tags = 
+;condition = 
+
+
+;There can be multiple prefilters.
+;While 'Prefilter' section is saved 
+;for backward compatibility, you can
+;Iterate e621 api over more than one
+;global filter. May be useful if you
+;want to e.g. download images before
+;videos.
+;To denote prefilter place 
+;section name between <> brackets.
+;[<Another prefilter>]
 ;tags = 
 ;condition = 
 
@@ -621,8 +639,9 @@ Settings for e621dl. All settings are boolean values that accept `true` or `fals
 | make_hardlinks | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
 | make_cache     | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
 | db             | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
+| offline        | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be dowloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. |
 
-Default values:
+
 
 ```ini
 [Settings]
@@ -632,13 +651,16 @@ make_cache = true
 db = true
 ```
 
-## Section [Prefilter]
+## Section [Prefilter] or any [\<triangle braked\>]
 
-If this section exists, filters from here will be used as first step filtering, and search string from here will be the only string to request from either API or DB. Here is an example:
+If these sections exist, filters from here will be used as first step filtering, and search string from here will be the only string to request from either API or DB. Here is an example:
 
 ```ini
 [Prefilter]
 tags = ~cat ~dog ~parrot ~owl
+
+[<Another prefilter>]
+tags = ~rabbit ~dolphin ~shark ~kangaroo
 
 [Cats]
 tags = cat
@@ -646,16 +668,28 @@ tags = cat
 [Dogs]
 tags = dog
 
-[Parrot]
+[Parrots]
 tags = parrot
 
-[Owl]
+[Owls]
 tags = owl
+
+[Rabbits]
+tags = rabbit
+
+[Dolphins]
+tags = dolphin
+
+[Sharks]
+tags = shark
+
+[Kangaroos]
+tags = kangaroo
 ```
 
 This way we will iterate over all four tags without redundant overlapping for every tag search string.
 
-Prefilter has exactly the same parameters as regular searches, but days are actually maximum days of all searches. Another limitation is metatags are not supported outside of prefilter section.
+Prefilters have exactly the same parameters as regular searches, but days are actually maximum days of all searches. Another limitation is metatags are not supported outside of prefilter sections.
 
 ## Normal Operation
 
@@ -668,23 +702,39 @@ posts so far : None so far
 last file downloaded : None so far
 current section : None so far
 last warning : None so far
+connection retries : None so far
+already exist : None so far
+downloaded : None so far
+copied : None so far
+filtered : None so far
+not found on e621 : None so far
 ```
 
-Status shows what's going on, that is if config is being parsed or if tags are checked or files are being downloaded, things like those.
+*Status* shows what's going on, that is if config is being parsed or if tags are checked or files are being downloaded, things like those.
 
-Checked tag shows which tag is checked for validity. It will be set to `all tags are valid` after check completion.
+*Checked* tag shows which tag is checked for validity. It will be set to `all tags are valid` after check completion.
 
-Posts so far shows how many posts are processed from api so far. Mostly here to show that the app is still working. It can lag a bit if a lot of new files are in download queue.
+*Posts* so far shows how many posts are processed from api so far. Mostly here to show that the app is still working. It can lag a bit if a lot of new files are in download queue.
 
-Last file downloaded shows what file has just been downloaded and where. Only files that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
+*Last* file downloaded shows what file has just been downloaded and where. Only files that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
 
-Current section shows which search group is processed now. If you use `prefilter`, only `prefilter` should be here.
+*Current* section shows which search group is processed now. If you use `prefilter`, only `prefilter` should be here.
 
-Last warning shows last non-critical info and is mostly for troubleshooting.
+*Last* warning shows last non-critical info and is mostly for troubleshooting.
 
+*Connection retries* shows how often connections was reopened. This could happen because your ISP reconnected, you pc went into sleep mode/hybernate, your network cable was unplugged or WiFi loosed signal. After 100 retries e621dl will be closed.
 
+*Already exist* shows how many files was already downloaded in exactly the same folder we want it to be.
 
-Note that if e621dl started with double click, its windows closes by itself on exit. This is mostly because of some coding shortcuts and because it would be hard to automate it otherwise. If you want for windows to continue after all downloads, you can use `e621_noclose.bat` in Windows, or run it from console directly on any OS.
+*Downloaded* shows how many files were actually downloaded from e621 servers.
+
+*Copied* shows how many files were copied/hardlinked from another folder or cache
+
+*Filtered* shows how many processed posts from e621 api were not downloaded because of rating, condition, score etc.
+
+*Not found on e621* shows if there was no such file on e621. This happens mostly with `post_source = db`  or `offline = true`, because post stored in database was deleted from e621 and there was no copy in a cache. On rare occasion post can become deleted in time between link was acquired and actual file was being download.
+
+Note that if e621dl started with double click, its window closes by itself on exit. This is mostly because of some coding shortcuts and because it would be hard to automate it otherwise. If you want for windows to continue after all downloads, you can use `e621_noclose.bat` in Windows, or run it from console directly on any OS.
 
 # Cloudflare Recaptcha
 

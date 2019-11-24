@@ -19,7 +19,10 @@ from e621dl_lib import remote
 download_queue = local.DownloadQueue()
 
 storage = local.PostsStorage()
+download_set = local.ActiveDownloadsSet()
 
+def is_prefilter(section_name):
+    return 'prefilter' == section_name or ( section_name[0]=='<' and section_name[-1] == '>' )
 
 def default_condition(x):
     return True
@@ -82,27 +85,30 @@ def get_directories(post, root_dirs, search, searches_dict):
         return results
     
 
-def get_files(post, format, root_dir, files, session, cachefunc, duplicate_func, search, searches_dict):
-    if format:
-        id_ext = f'{post.id}.{post.file_ext}'
-        custom_prefix = format.format(**post.generate())[:100]
-        filename = f'{custom_prefix}.{id_ext}'
-    else:
-        filename = f'{post.id}.{post.file_ext}'
-    
-    
-    for directory in get_directories(post, [root_dir], search, searches_dict):
-        file_id=post.id
-        path = local.make_path(directory, filename)
-
-        if os.path.isfile(path):
-            continue
-        elif file_id in files:
-            duplicate_func(files[file_id], path)
-            continue
+def get_files(post, format, root_dir, files, session, cachefunc, duplicate_func, search, searches_dict, download_post):
+    with download_set.context_id(post.id):
+        if format:
+            id_ext = f'{post.id}.{post.file_ext}'
+            custom_prefix = format.format(**post.generate())[:100]
+            filename = f'{custom_prefix}.{id_ext}'
         else:
-            if remote.download_post(post.file_url, path, session, cachefunc, duplicate_func):
-                files[file_id]=path
+            filename = f'{post.id}.{post.file_ext}'
+        
+        for directory in get_directories(post, [root_dir], search, searches_dict):
+            file_id=post.id
+            path = local.make_path(directory, filename)
+
+            if os.path.isfile(path):
+                local.printer.increment_old()
+            elif file_id in files:
+                duplicate_func(files[file_id], path)
+                local.printer.increment_copied()
+            else:
+                if download_post(post.file_url, path, session, cachefunc, duplicate_func):
+                    files[file_id]=path
+                    local.printer.increment_downloaded()
+                else:
+                    local.printer.increment_not_found()
                 
 #@profile
 def prefilter_build_index(kwargses, use_db):
@@ -129,10 +135,11 @@ def prefilter_build_index(kwargses, use_db):
             results_num = 0
             
             for results in gen(last_id, **kwargs):
-                results_num += len(results)
-                local.printer.change_post(results_num)
+                local.printer.increment_posts(len(results))
                 append_func(results)
                 filtered_results=process_results(results, **kwargs)
+                local.printer.increment_filtered(len(set(results) - set(filtered_results)))
+                
                 download_queue.append( (directory, filtered_results) )
                 post=results[-1]
                 download_queue.last_id=post.id
@@ -187,14 +194,18 @@ def main():
         
         duplicate_func = copy
         cachefunc = None
-        prefilter = None
+        prefilter = []
         max_days_ago = default_days_ago
         cond_func = lambda x: True
         default_gen_func = remote.get_posts
         default_append_func = lambda x: None
         
+        get_tag_alias = remote.get_tag_alias
+        download_post = remote.download_post
+        
         use_db = False
         allow_append = False
+        full_offline = False
         
         # Iterate through all sections (lines enclosed in brackets: []).
         for section in config.sections():
@@ -218,6 +229,20 @@ def main():
                             default_append_func = storage.append
                             use_db = True
                             allow_append = True
+                            
+            if section.lower() == 'settings':
+                for option, value in config.items(section):
+                    if option.lower() in {'full_offline', 'offline'}:
+                        if value.lower() == 'true':
+                            default_gen_func=storage.gen
+                            default_append_func = lambda x: None
+                            
+                            get_tag_alias = lambda _tag, _session: _tag
+                            download_post = lambda _file_url, _path, _session, _cachefunc, _duplicate_func : False
+                            
+                            use_db = True
+                            allow_append = False
+                            full_offline = True
 
                 if make_cache_flag:
                     cachefunc = duplicate_func
@@ -254,7 +279,7 @@ def main():
             elif section.lower() == 'blacklist':
                 for option, value in config.items(section):
                     if option.lower() in {'tags', 'tag'}:
-                        blacklist = [remote.get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                        blacklist = [get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
 
         # Making use of include_md5
         if include_md5 and len(default_format) == 0:
@@ -291,7 +316,7 @@ def main():
 
                     # Get the tags that will be searched for. Tags are aliased to their acknowledged names.
                     if option.lower() in {'tags', 'tag'}:
-                        section_tags = [remote.get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                        section_tags = [get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
                         section_blacklist += [tag[1:] for tag in section_tags if tag[0]=='-']
                         section_anylist   += [tag[1:] for tag in section_tags if tag[0]=='~']
                         section_whitelist += [tag for tag in section_tags if tag[0] not in ('-','~')]
@@ -304,7 +329,7 @@ def main():
                         section_date = local.get_date(section_days_ago)
                         max_days_ago = max(max_days_ago, section_days_ago)
                     elif option.lower() in {'blacklist', 'blacklist_tags', 'blacklisted'}:
-                        section_blacklisted = [remote.get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                        section_blacklisted = [get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
                     elif option.lower() in {'min_score', 'score'}:
                         section_score = int(value)
                     elif option.lower() in {'min_favs', 'favs'}:
@@ -321,14 +346,14 @@ def main():
                     elif option.lower() in {'condition', 'conditions'}:
                         if value.lower().strip():
                             source_template, tags = local.tags_and_source_template(value.lower().strip())
-                            tags = [remote.get_tag_alias(tag.lower(), session) for tag in tags]
+                            tags = [get_tag_alias(tag.lower(), session) for tag in tags]
                             section_cond_func = local.make_check_funk(source_template, tags)
                     elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from', 'post_func', 'post_source'}:
                         if value.lower() in {'db','database','local'}:
                             section_gen_func=storage.gen
                             section_append_func = lambda x: None
                             use_db = True
-                        else:
+                        elif not full_offline:
                             section_gen_func=remote.get_posts
                             if allow_append:
                                 section_append_func = storage.append
@@ -367,8 +392,8 @@ def main():
                                  'subdirectories': section_subdirectories,
                                  'session'  : session}
                 
-                if section.lower() == 'prefilter':
-                    prefilter=section_dict
+                if is_prefilter(section.lower()):
+                    prefilter.append(section_dict)
                 else:
                     searches_dict[section_directory] = section_dict
                     if section_id[0] != "*":
@@ -377,15 +402,17 @@ def main():
         local.printer.change_tag("all tags are valid")
         local.printer.change_status("Checking for partial downloads")
 
-        remote.finish_partial_downloads(session, cachefunc, duplicate_func)
+        if not full_offline:
+            remote.finish_partial_downloads(session, cachefunc, duplicate_func)
         
         local.printer.change_status("Building downloaded files dict")
         files = local.get_files_dict(bool(cachefunc)) 
         
         
         if prefilter:
-            prefilter['days_ago'] = max_days_ago
-            kwargs = [prefilter]
+            for pf in prefilter:
+                pf['days_ago'] = max_days_ago
+            kwargs = prefilter
         else:
             kwargs = [search for search in searches if not download_queue.in_gens(search['directory'])]
 
@@ -406,41 +433,49 @@ def main():
                     sleep(0.5)
                     continue
     
+            filtered_away = set(chunk)
+            results_pair = []
             for search in searches:
                 # Sets up a loop that will continue indefinitely until the last post of a search has been found.
                 directory = search['directory']
                 format = search['format']
-                if chunk_directory.lower() not in (directory.lower(), 'prefilter'):
+                if chunk_directory.lower() != directory.lower() and not is_prefilter(chunk_directory.lower()):
                     continue
 
                 results = process_results(chunk, **search)
-                futures = []
+                filtered_away -= set(results)
+                results_pair += list(zip([search]*len(results), results))
+            
+            local.printer.increment_filtered(len(filtered_away))
+
+            futures = []
+            for search, post in results_pair:
+                directory = search['directory']
+                format = search['format']
+                if search['posts_countdown'] <= 0:
+                    continue
+                    
+                futures.append(download_pool.submit(get_files,
+                    post, format, directory, files,
+                    session, cachefunc, duplicate_func, search, searches_dict, download_post))
                 
-                for post in results:
-                    if search['posts_countdown'] <= 0:
-                        break
-                        
-                    futures.append(download_pool.submit(get_files,
-                        post, format, directory, files,
-                        session, cachefunc, duplicate_func, search, searches_dict))
-                    
-                    # TODO: Make sure that file in download queue
-                    # actually downloaded and only then decrease counter.
-                    search['posts_countdown'] -= 1
+                # TODO: Make sure that file in download queue
+                # actually downloaded and only then decrease counter.
+                search['posts_countdown'] -= 1
                     
 
-                for future in futures:
-                    if future.exception():
-                        try:
-                            raise future.exception()
-                        except: #Pull request a better way
-                            local.printer.show(False)
-                            sleep(0.101)
-                            print("Exception during download:")
-                            print_exc()
-                            download_queue.save()
-                            os._exit(0)
-
+            for future in futures:
+                if future.exception():
+                    try:
+                        raise future.exception()
+                    except: #Pull request a better way
+                        local.printer.show(False)
+                        sleep(0.101)
+                        print("Exception during download:")
+                        print_exc()
+                        download_queue.save()
+                        os._exit(0)
+            
             download_queue.popleft()
         # End program.
     

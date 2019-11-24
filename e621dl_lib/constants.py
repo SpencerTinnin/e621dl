@@ -1,7 +1,12 @@
-VERSION = '5.5.0'
+VERSION = '5.6.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
+
+#first number: time to establish connection
+#second number: max wait between bytes sent
+#aka (connect timeout, read timeout)
+CONNECTION_TIMEOUT = (6.1, 15.5)
 
 DEFAULT_SLOTS = ['id','tags','rating','md5','file_ext','file_url',
                  'score','fav_count','days_ago', 'sources', 'artist', 'description',
@@ -14,9 +19,9 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;These are default values
 ;[Settings]
 ;include_md5 = false
-;make_hardlinks = false
-;make_cache = false
-;db = false
+;make_hardlinks = true
+;make_cache = true
+;db = true
 
 ;These are default settings for all search groups below
 ;[Defaults]
@@ -36,6 +41,20 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;Mostly useful if you have a lot of searches
 ;that all have something in common.
 ;[Prefilter]
+;tags = 
+;condition = 
+
+
+;There can be multiple prefilters.
+;While 'Prefilter' section is saved 
+;for backward compatibility, you can
+;Iterate e621 api over more than one
+;global filter. May be useful if you
+;want to e.g. download images before
+;videos.
+;To denote prefilter place 
+;section name between <> brackets.
+;[<Another prefilter>]
 ;tags = 
 ;condition = 
 

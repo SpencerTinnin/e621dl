@@ -3,7 +3,7 @@ import configparser
 import datetime
 import os
 import atexit
-from threading import Lock
+from threading import Lock, Condition
 from collections import deque
 import sqlite3
 import pickle
@@ -12,6 +12,7 @@ from functools import lru_cache
 import hashlib
 from threading import Thread
 from shutil import get_terminal_size
+from contextlib import contextmanager
 
 # External Imports
 import colorama
@@ -25,19 +26,32 @@ class StatPrinter(Thread):
 
         colorama.init()
         self.messages = deque()
+        self._increments = deque()
         self._show = True
         
     def run(self):
         lines = {'status' : 'Just starting',
                  'checked tag' : 'None so far',
-                 'posts so far' : 'None so far',
+                 'posts so far' : 0,
                  'last file downloaded' : 'None so far',
                  'current section' : 'None so far',
-                 'last warning' : 'None so far'
+                 'last warning' : 'None so far',
+                 'connection retries' : 0,
+                 'already exist': 0,
+                 'downloaded' : 0,
+                 'copied' : 0,
+                 'filtered' : 0,
+                 'not found on e621' : 0,
+                 
                  }
         while True:
             while self.messages:
                 lines.update(self.messages.popleft())
+            
+            while self._increments:
+                k, v = self._increments.popleft()
+                lines[k] += v
+                
             
             if not self._show:
                 sleep(0.5)
@@ -46,6 +60,7 @@ class StatPrinter(Thread):
             columns = get_terminal_size((80, 20)).columns
             self.reset_screen()
             for k,v in lines.items():
+                v = 'None so far' if v == 0 else v
                 print(f"{k}: {v}"[:columns])
             sleep(0.5)
             
@@ -58,9 +73,6 @@ class StatPrinter(Thread):
     def change_tag(self, text):
         self.messages.append({'checked tag' : text})
     
-    def change_post(self, text):
-        self.messages.append({'posts so far' : text})
-       
     def change_file(self, text):
         self.messages.append({'last file downloaded' : text})
 
@@ -70,12 +82,63 @@ class StatPrinter(Thread):
     def change_warning(self, text):
         self.messages.append({'last warning' : text})
     
+    def increment_retries(self):
+        self._increments.append(('connection retries', 1))
+    
+    def increment_downloaded(self):
+        self._increments.append(('downloaded', 1))
+    
+    def increment_copied(self):
+        self._increments.append(('copied' , 1))
+    
+    def increment_not_found(self):
+        self._increments.append(('not found on e621' , 1))
+
+    def increment_old(self):
+        self._increments.append(('already exist' , 1))    
+
+    def increment_posts(self, amount):
+        self._increments.append(('posts so far' , amount))
+    
+    def increment_filtered(self, amount):
+        self._increments.append(('filtered' , amount))
+    
+    
+    
     def show(self, val = True):
         self._show = val
         
 
 printer = StatPrinter()
 
+class ActiveDownloadsSet:
+    def __init__(self, max_downloads = 2):
+        self._cv = Condition(lock=Lock())
+        self._active_downloads = set()
+        self._max_downloads = max_downloads
+        
+    def add_id(self, id):
+        def _predicate():
+            return (len(self._active_downloads) < self._max_downloads
+                   and id not in self._active_downloads)
+            
+        with self._cv:
+            self._cv.wait_for(_predicate)
+            self._active_downloads.add(id)
+            
+    def remove_id(self, id):
+        with self._cv:
+            self._active_downloads.discard(id)
+            self._cv.notify_all()
+            
+    @contextmanager
+    def context_id(self, id):
+        self.add_id(id)
+        try:
+            yield
+        finally:
+            self.remove_id(id)
+            
 class DownloadQueue:
     def __init__(self):
         self._lock = Lock()
