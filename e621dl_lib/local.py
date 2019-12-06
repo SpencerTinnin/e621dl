@@ -28,42 +28,51 @@ class StatPrinter(Thread):
         self.messages = deque()
         self._increments = deque()
         self._show = True
+        self._is_running = True
+        
+        self.lines = {'status' : 'Just starting',
+                      'checked tag' : 'None so far',
+                      'posts so far' : 0,
+                      'last file downloaded' : 'None so far',
+                      'current section' : 'None so far',
+                      'last warning' : 'None so far',
+                      'connection retries' : 0,
+                      'already exist': 0,
+                      'downloaded' : 0,
+                      'copied' : 0,
+                      'filtered' : 0,
+                      'not found on e621' : 0,
+                      }
+        
+        
+    def stop(self):
+        self._is_running = False
+        
+    def step(self):
+        while self.messages:
+            self.lines.update(self.messages.popleft())
+        
+        while self._increments:
+            k, v = self._increments.popleft()
+            self.lines[k] += v
+            
+        
+        if not self._show:
+            return
+            
+        columns = get_terminal_size((80, 20)).columns
+        self.reset_screen()
+        for k,v in self.lines.items():
+            v = 'None so far' if v == 0 else v
+            print(f"{k}: {v}"[:columns])
+        
         
     def run(self):
-        lines = {'status' : 'Just starting',
-                 'checked tag' : 'None so far',
-                 'posts so far' : 0,
-                 'last file downloaded' : 'None so far',
-                 'current section' : 'None so far',
-                 'last warning' : 'None so far',
-                 'connection retries' : 0,
-                 'already exist': 0,
-                 'downloaded' : 0,
-                 'copied' : 0,
-                 'filtered' : 0,
-                 'not found on e621' : 0,
-                 
-                 }
-        while True:
-            while self.messages:
-                lines.update(self.messages.popleft())
-            
-            while self._increments:
-                k, v = self._increments.popleft()
-                lines[k] += v
-                
-            
-            if not self._show:
-                sleep(0.5)
-                continue
-                
-            columns = get_terminal_size((80, 20)).columns
-            self.reset_screen()
-            for k,v in lines.items():
-                v = 'None so far' if v == 0 else v
-                print(f"{k}: {v}"[:columns])
+
+        while self._is_running:
+            self.step()
             sleep(0.5)
-            
+           
     def reset_screen(self):
         print("\033[1J\033[1;1H", end='')
 

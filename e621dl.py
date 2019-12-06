@@ -33,6 +33,8 @@ def has_actual_search(whitelist, blacklist, anylist, cond_func, **dummy):
 
 def process_result(post, whitelist, blacklist, anylist, cond_func, ratings, min_score, min_favs, days_ago, **dummy):
     tags = post.tags
+    if not has_actual_search(whitelist, blacklist, anylist, cond_func):
+        return []
     if whitelist and not all( any(reg.fullmatch(tag) for tag in tags) for reg in whitelist ):
         return []
     elif blacklist and any( any(reg.fullmatch(tag) for tag in tags) for reg in blacklist ):
@@ -65,27 +67,36 @@ def process_results(results, **dummy):
 def get_directories(post, root_dirs, search, searches_dict):
     subdirectories = search['subdirectories']
     
-    if not subdirectories:
-        return ['/'.join(root_dirs)]
-    
+    # below lies recursion
+    # Essentially we travel down the tree
+    # until we get to branch with no subbranches
     results = []
-    for directory in subdirectories:
-        #preventing recursions in cases like cat/dog/cat/dog/...
-        if directory in root_dirs:
-            continue
-        if process_result(post, **searches_dict[directory]):
+    
+    search_result = process_result(post, **search)
+    
+    # We travel below only if current folder matches
+    # our criteria
+    if search_result or not has_actual_search(**search):
+        for directory in subdirectories:
+            #preventing recursions in cases like cat/dog/cat/dog/...
+            if directory in root_dirs:
+                continue
+
             results += get_directories(post, root_dirs + [directory], searches_dict[directory], searches_dict)
-            
-    # if no results for subdirectories found
-    # and current directory has some conditions to search
-    # we place file here
-    if not results and has_actual_search(**search):
+    # And for each branch on the same level,
+    # We check if we should place files there.
+    # If we find matching folder on a deeper level
+    # (that is, results are not empty),
+    # we won't place file on a current level.
+    # If not, we check if current folder
+    # matches and if it is, we place our file there
+    if not results and search_result:
         return ['/'.join(root_dirs)]
     else:
         return results
     
 
-def get_files(post, format, root_dir, files, session, cachefunc, duplicate_func, search, searches_dict, download_post):
+def get_files(post, format, directories, files, session, cachefunc, duplicate_func, download_post, search):
     with download_set.context_id(post.id):
         if format:
             id_ext = f'{post.id}.{post.file_ext}'
@@ -94,7 +105,7 @@ def get_files(post, format, root_dir, files, session, cachefunc, duplicate_func,
         else:
             filename = f'{post.id}.{post.file_ext}'
         
-        for directory in get_directories(post, [root_dir], search, searches_dict):
+        for directory in directories:
             file_id=post.id
             path = local.make_path(directory, filename)
 
@@ -109,15 +120,17 @@ def get_files(post, format, root_dir, files, session, cachefunc, duplicate_func,
                     local.printer.increment_downloaded()
                 else:
                     local.printer.increment_not_found()
+                    return search, False
+        
+        return search, True
                 
 #@profile
-def prefilter_build_index(kwargses, use_db):
+def prefilter_build_index(kwargses, use_db, searches):
     
     if use_db:
         storage.connect()
     
     try:
-
         if download_queue.completed:
             return
         
@@ -126,7 +139,6 @@ def prefilter_build_index(kwargses, use_db):
         for kwargs in kwargses:
 
             directory = kwargs['directory']
-            print('')
             local.printer.change_section(directory)
             gen = kwargs['gen_funcs']
             append_func=kwargs['append_func']
@@ -145,14 +157,17 @@ def prefilter_build_index(kwargses, use_db):
                 download_queue.last_id=post.id
                 if post.days_ago >= max_days_ago:
                     break
-                if kwargs['posts_countdown'] <= 0:
+                
+                if not any(s for s in searches if s['posts_countdown'] > 0):
                     break
-            
             last_id = 0x7F_FF_FF_FF
             download_queue.completed_gen(directory)
         download_queue.completed = True
     except:
         local.printer.show(False)
+        local.printer.stop()
+        sleep(0.101)
+        local.printer.reset_screen()
         print("Exception in api iterator:")
         print_exc()
     finally:
@@ -164,7 +179,9 @@ def prefilter_build_index(kwargses, use_db):
 def main():
     # Create the requests session that will be used throughout the run.
     
+    # local.printer.show(False)
     local.printer.start()
+    
     
     local.save_on_exit_events(download_queue.save)
     with remote.requests_retry_session() as session:
@@ -417,7 +434,7 @@ def main():
             kwargs = [search for search in searches if not download_queue.in_gens(search['directory'])]
 
         local.printer.change_status("Downloading files")
-        queue_thread=Thread(target=prefilter_build_index, args=(kwargs, use_db))
+        queue_thread=Thread(target=prefilter_build_index, args=(kwargs, use_db, searches))
         queue_thread.start()
         
         download_pool=ThreadPoolExecutor(max_workers=2)
@@ -436,46 +453,57 @@ def main():
             filtered_away = set(chunk)
             results_pair = []
             for search in searches:
-                # Sets up a loop that will continue indefinitely until the last post of a search has been found.
                 directory = search['directory']
-                format = search['format']
                 if chunk_directory.lower() != directory.lower() and not is_prefilter(chunk_directory.lower()):
                     continue
 
-                results = process_results(chunk, **search)
-                filtered_away -= set(results)
-                results_pair += list(zip([search]*len(results), results))
+                results_pair += list(zip([search]*len(chunk), chunk))
             
-            local.printer.increment_filtered(len(filtered_away))
-
-            futures = []
-            for search, post in results_pair:
-                directory = search['directory']
-                format = search['format']
-                if search['posts_countdown'] <= 0:
-                    continue
+            #local.printer.increment_filtered(len(filtered_away))
+            while results_pair:
+                futures = []
+                remaining_from_countdown=[]
+                for search, post in results_pair:
+                    directory = search['directory']
+                    format = search['format']
+                    if search['posts_countdown'] <= 0:
+                        remaining_from_countdown.append( (search, post) )
+                        continue
                     
-                futures.append(download_pool.submit(get_files,
-                    post, format, directory, files,
-                    session, cachefunc, duplicate_func, search, searches_dict, download_post))
+                    directories = get_directories(post, [directory], search, searches_dict)
+                    if directories:
+                        futures.append(download_pool.submit(get_files,
+                            post, format, directories, files,
+                            session, cachefunc, duplicate_func, download_post, search))
+                        
+                        search['posts_countdown'] -= 1
+                    else:
+                        local.printer.increment_filtered(len(filtered_away))
+                        
+                for future in futures:
+                    if future.exception():
+                        try:
+                            raise future.exception()
+                        except: #Pull request a better way
+                            local.printer.show(False)
+                            local.printer.stop()
+                            sleep(0.101)
+                            local.printer.reset_screen()
+                            print("Exception during download:")
+                            print_exc()
+                            download_queue.save()
+                            os._exit(0)
+                    
+                    #Recovering wrong countdown decrement
+                    search, success = future.result()
+                    if not success:
+                        search['posts_countdown'] += 1
                 
-                # TODO: Make sure that file in download queue
-                # actually downloaded and only then decrease counter.
-                search['posts_countdown'] -= 1
+                results_pair = []
+                for search, post in remaining_from_countdown:
+                    if search['posts_countdown'] > 0:
+                        results_pair.append(search, post)
                     
-
-            for future in futures:
-                if future.exception():
-                    try:
-                        raise future.exception()
-                    except: #Pull request a better way
-                        local.printer.show(False)
-                        sleep(0.101)
-                        print("Exception during download:")
-                        print_exc()
-                        download_queue.save()
-                        os._exit(0)
-            
             download_queue.popleft()
         # End program.
     
@@ -484,6 +512,9 @@ def main():
         download_queue.reset()
         
     local.printer.change_status("All complete")
+    local.printer.stop()
+    local.printer.join()
+    local.printer.step()
     raise SystemExit
     
     
