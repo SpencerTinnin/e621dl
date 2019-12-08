@@ -302,6 +302,45 @@ def main():
         if include_md5 and len(default_format) == 0:
             default_format = '{id}.{md5}'
 
+        # making a set of all sections
+        all_sections_list = set()
+        for section in config.sections():
+            section_id = section.lower().strip()
+            if section_id in {'settings','defaults','blacklist'}:
+                continue
+            
+            if is_prefilter(section_id):
+                continue
+            
+            if section_id[0] == "*":
+                section_directory = section_id[1:]
+            else:
+                section_directory = section_id
+            
+            all_sections_list.add(section_directory)
+            
+        # checking if all subfolders in folders are correct
+        for section in config.sections():
+            section_id = section.lower().strip()
+            if section_id in {'settings','defaults','blacklist'}:
+                continue
+            
+            if is_prefilter(section_id):
+                continue
+                
+            for option, value in config.items(section):
+                op_low = option.lower()
+                if op_low in {'subfolder', 'subfolders', 'subdir', 'subdirs', 'subdirectory', 'subdirectories'}:
+                    for subfolder in value.replace(',', ' ').lower().strip().split():
+                        if subfolder not in all_sections_list:
+                            local.printer.show(False)
+                            local.printer.stop()
+                            sleep(0.101)
+                            local.printer.reset_screen()
+                            print(f'[!] Error in section "{section}":')
+                            print(f'subfolder "{subfolder}" does not exists')
+                            download_queue.save()
+                            os._exit(0)
         # If the section name is not one of the above, it is assumed to be the values for a search.
         # two for cycles in case of e.g 'blacklist' is in the end of a config file 
         for section in config.sections():
@@ -409,7 +448,7 @@ def main():
                                  'subdirectories': section_subdirectories,
                                  'session'  : session}
                 
-                if is_prefilter(section.lower()):
+                if is_prefilter(section_id):
                     prefilter.append(section_dict)
                 else:
                     searches_dict[section_directory] = section_dict
@@ -438,74 +477,75 @@ def main():
         queue_thread.start()
         
         download_pool=ThreadPoolExecutor(max_workers=2)
-        
-        while True:
-            try:
-                chunk_directory, chunk = download_queue.first()
-            except:
-            
-                if download_queue.aborted:
-                    break
-                else:
-                    sleep(0.5)
-                    continue
-    
-            filtered_away = set(chunk)
-            results_pair = []
-            for search in searches:
-                directory = search['directory']
-                if chunk_directory.lower() != directory.lower() and not is_prefilter(chunk_directory.lower()):
-                    continue
-
-                results_pair += list(zip([search]*len(chunk), chunk))
-            
-            #local.printer.increment_filtered(len(filtered_away))
-            while results_pair:
-                futures = []
-                remaining_from_countdown=[]
-                for search, post in results_pair:
-                    directory = search['directory']
-                    format = search['format']
-                    if search['posts_countdown'] <= 0:
-                        remaining_from_countdown.append( (search, post) )
-                        continue
-                    
-                    directories = get_directories(post, [directory], search, searches_dict)
-                    if directories:
-                        futures.append(download_pool.submit(get_files,
-                            post, format, directories, files,
-                            session, cachefunc, duplicate_func, download_post, search))
-                        
-                        search['posts_countdown'] -= 1
-                    else:
-                        local.printer.increment_filtered(len(filtered_away))
-                        
-                for future in futures:
-                    if future.exception():
-                        try:
-                            raise future.exception()
-                        except: #Pull request a better way
-                            local.printer.show(False)
-                            local.printer.stop()
-                            sleep(0.101)
-                            local.printer.reset_screen()
-                            print("Exception during download:")
-                            print_exc()
-                            download_queue.save()
-                            os._exit(0)
-                    
-                    #Recovering wrong countdown decrement
-                    search, success = future.result()
-                    if not success:
-                        search['posts_countdown'] += 1
+        try:
+            while True:
+                try:
+                    chunk_directory, chunk = download_queue.first()
+                except:
                 
+                    if download_queue.aborted:
+                        break
+                    else:
+                        sleep(0.5)
+                        continue
+        
+                filtered_away = set(chunk)
                 results_pair = []
-                for search, post in remaining_from_countdown:
-                    if search['posts_countdown'] > 0:
-                        results_pair.append(search, post)
+                for search in searches:
+                    directory = search['directory']
+                    if chunk_directory.lower() != directory.lower() and not is_prefilter(chunk_directory.lower()):
+                        continue
+
+                    results_pair += list(zip([search]*len(chunk), chunk))
+                
+                #local.printer.increment_filtered(len(filtered_away))
+                while results_pair:
+                    futures = []
+                    remaining_from_countdown=[]
+                    for search, post in results_pair:
+                        directory = search['directory']
+                        format = search['format']
+                        if search['posts_countdown'] <= 0:
+                            remaining_from_countdown.append( (search, post) )
+                            continue
+                        
+                        directories = get_directories(post, [directory], search, searches_dict)
+                        if directories:
+                            futures.append(download_pool.submit(get_files,
+                                post, format, directories, files,
+                                session, cachefunc, duplicate_func, download_post, search))
+                            
+                            search['posts_countdown'] -= 1
+                        else:
+                            local.printer.increment_filtered(1)
+                            
+                    for future in futures:
+                        if future.exception():
+                            raise future.exception()
+                        
+                        #Recovering wrong countdown decrement
+                        #Still not good and may lead to less post than
+                        #max_posts. But better than it was
+                        search, success = future.result()
+                        if not success:
+                            search['posts_countdown'] += 1
                     
-            download_queue.popleft()
-        # End program.
+                    results_pair = []
+                    for search, post in remaining_from_countdown:
+                        if search['posts_countdown'] > 0:
+                            results_pair.append(search, post)
+                        
+                download_queue.popleft()
+            # End program.
+        except: #Pull request a better way
+            local.printer.show(False)
+            local.printer.stop()
+            sleep(0.101)
+            local.printer.reset_screen()
+            print("Exception during download:")
+            print_exc()
+            download_queue.save()
+            os._exit(0)
     
     
     if download_queue.completed:
