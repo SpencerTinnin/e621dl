@@ -28,6 +28,8 @@ Main features of this fork:
 - Max downloaded files per section limit. You can download only, say, 100 last files.
 - **`order:` metatag family support**. With max downloads limit you can get e.g. top 10 most rated or top 25 least favorite.
 - **Multithreaded**. 
+- **Folder pruning**. All files that are no longer required can be removed on next run. This is **not** a default behavior.
+- Easy blacklisting. Just move files you don't wanna see again to a special folder, and you won't. The files will also be removed from the folder.
 
 # Installing and Setting Up **e621dl**
 
@@ -91,12 +93,17 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;; GENERAL  ;;
 ;;;;;;;;;;;;;;
 
-;These are default values
+;Meaning of these setting described
+;In the README.md in Section [Settings]
+;These settings are all false by default
 ;[Settings]
-;include_md5 = false
+;include_md5 = true
 ;make_hardlinks = true
 ;make_cache = true
 ;db = true
+;offline = true
+;prune_downloads = true
+;prune_cache = true
 
 ;These are default settings for all search groups below
 ;[Defaults]
@@ -633,13 +640,15 @@ This section have only one option, `tags`, an essentially every tags from here a
 
 Settings for e621dl. All settings are boolean values that accept `true` or `false`.
 
-| Name           | Description                                                  |
-| -------------- | ------------------------------------------------------------ |
-| include_md5    | Changed in e621dl 5.4.0. If `true`, and format field in [defaults] is not set, default format became id.md5.id.ext instead of id.ext. This way you can deduplicate files and see md5 in a filename |
-| make_hardlinks | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
-| make_cache     | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
-| db             | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
-| offline        | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be dowloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. |
+| Name            | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
+| include_md5     | Changed in e621dl 5.4.0. If `true`, and format field in [defaults] is not set, default format became id.md5.id.ext instead of id.ext. This way you can deduplicate files and see md5 in a filename |
+| make_hardlinks  | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
+| make_cache      | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
+| db              | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
+| offline         | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. |
+| prune_downloads | If `true`, all files in `downloads` that do not meet any of search criteria will be removed. It's as if you removed everything and then download only what you need. |
+| prune_cache     | If you have a cache folder and if `true` , than any files that has not a single copy/hardlink in `downloads ` will be deleted. It's as if we manually removed all files in the cache and then copied it from downloads. |
 
 
 
@@ -739,6 +748,12 @@ Note that if e621dl started with double click, its window closes by itself on ex
 # Cloudflare Recaptcha
 
 If for some reason Cloudflare thinks your IP is DDOS'ing e621, use this instruction to solve a captcha: [Cloudflare solution](Cloudflare.md)
+
+# Individual post blacklisting
+
+After first download of something, in the app folder there will be folder `to_blocked_posts` and file `blocked_posts.txt`. You can either move/copy blocked files to the folder, or manually add id of an art in the file, one id per line. On next `e621dl` run all files in `to_blocked_posts`  will be removed (but not folders for now), and these files will never be downloaded again. 
+
+
 
 # Automation of **e621dl**
 

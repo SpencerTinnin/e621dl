@@ -12,7 +12,7 @@ from functools import lru_cache
 import hashlib
 from threading import Thread
 from shutil import get_terminal_size
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 # External Imports
 import colorama
@@ -211,6 +211,9 @@ class DownloadQueue:
         except:
             self.config_hash=None
         
+    def is_reset(self):
+        return self.last_id == 0x7F_FF_FF_FF
+       
     def completed_gen(self, name):
         with self._lock:
             self.completed_deque.append(name)
@@ -258,9 +261,44 @@ class PostsStorage:
     def gen(self, last_id, **dummy):
         self.cur.execute('SELECT struct FROM posts WHERE id<=? ORDER BY id DESC', (last_id,))
         results=[pickle.loads(result[0]) for result in self.cur.fetchmany()]
+        #TODO: recreate days_ago based on created_at
         while results:
             yield results
             results=[pickle.loads(result[0]) for result in self.cur.fetchmany()]
+
+class PathesStorage:
+    def __init__(self):
+        self.conn = sqlite3.connect('files.db', isolation_level=None)
+        self.cur = self.conn.cursor()
+    
+    def begin(self):
+        self.cur.execute("BEGIN;")        
+    
+    def add_pathes(self, directories, filename):
+        #self.cur.execute("BEGIN TRANSACTION;")
+        for directory in directories:
+            filepath = self.make_path(directory, filename)
+            self.cur.execute('INSERT OR REPLACE INTO new_files VALUES (?);', (filepath,))
+        
+    
+    def commit(self):
+        self.cur.execute("COMMIT;")
+    
+    @lru_cache(maxsize=512, typed=False)
+    def make_new_dir(self, dir_name):
+        return ''.join([substitute_illegals(char) for char in dir_name]).lower().replace('\\','/')
+
+    def make_path(self, dir_name, filename):
+        return f"downloads/{self.make_new_dir(dir_name)}/{substitute_illegals_filename(filename)}"
+
+    def remove_old(self):
+        self.cur.execute('''
+            SELECT fullpath FROM old_files
+            EXCEPT
+            SELECT fullpath FROM new_files;''')
+        for (filename, ) in self.cur:
+            with suppress(FileNotFoundError):
+                os.remove(filename)
 
 _handler_gc_protection = [] #in case of lambdas
 
@@ -430,7 +468,7 @@ def substitute_illegals_filename(filename):
 
 @lru_cache(maxsize=512, typed=False)
 def make_new_dir(dir_name):
-    clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower()
+    clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower().replace('\\','/')
     os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
     return clean_dir_name
 
@@ -443,8 +481,51 @@ def make_cache_folder():
     except FileExistsError:
         pass
     
-def get_files_dict(have_cache):
+def get_files_dict(have_cache, make_new_files):
     filedict={}
+    if have_cache:
+        for root, dirs, files in os.walk('cache/'):
+            for file in files:
+                id=file.split('.')[-2] #id section
+                id=int(id)
+                filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
+                filedict[id]=filepath
+
+    conn = sqlite3.connect('files.db', isolation_level=None)
+    cur = conn.cursor()
+    cur.executescript(
+        '''
+        BEGIN TRANSACTION;
+        DROP TABLE IF EXISTS old_files;
+        
+        CREATE TABLE old_files (
+            fullpath    TEXT PRIMARY KEY
+                           UNIQUE
+                           NOT NULL
+        ) WITHOUT ROWID;
+        
+        COMMIT;
+        '''
+    )
+
+    if make_new_files:
+        cur.executescript(
+        '''
+        BEGIN TRANSACTION;
+        DROP TABLE IF EXISTS new_files;
+        
+        CREATE TABLE new_files (
+            fullpath    TEXT PRIMARY KEY
+                           UNIQUE
+                           NOT NULL
+        ) WITHOUT ROWID;
+        
+        COMMIT;
+        '''
+        )
+    
+    conn.commit()
+    cur.execute("BEGIN TRANSACTION;")
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
             splitted=file.split('.')
@@ -453,16 +534,76 @@ def get_files_dict(have_cache):
             else:
                 id=file.split('.')[-2] #id section
             id=int(id)
-            filedict[id]='{}/{}'.format(root,file)
-    
-    if have_cache:
-        for root, dirs, files in os.walk('cache/'):
-            for file in files:
-                id=file.split('.')[-2] #id section
-                id=int(id)
-                filedict[id]='{}/{}'.format(root,file)
+            filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
+            if id not in filedict:
+                filedict[id]=filepath
+            cur.execute('INSERT INTO old_files VALUES (?);', (filepath,))
+    cur.execute("COMMIT;")
+    conn.commit()
     
     return filedict
+
+def prune_cache():
+    conn = sqlite3.connect('files.db', isolation_level=None)
+    cur = conn.cursor()
+    cur.executescript(
+        '''
+        BEGIN TRANSACTION;
+        DROP TABLE IF EXISTS used_ids;
+        
+        CREATE TABLE used_ids (
+            id    INTEGER PRIMARY KEY
+                           UNIQUE
+                           NOT NULL
+        ) WITHOUT ROWID;
+
+        DROP TABLE IF EXISTS cached_files;
+        
+        CREATE TABLE cached_files (
+            id    INTEGER PRIMARY KEY
+                           UNIQUE
+                           NOT NULL,
+            fullpath       TEXT 
+                           UNIQUE
+                           NOT NULL   
+        ) WITHOUT ROWID;
+        
+        COMMIT;
+        '''
+    )
+    
+    conn.commit()
+    cur.execute("BEGIN TRANSACTION;")
+    for root, dirs, files in os.walk('downloads/'):
+        for file in files:
+            splitted=file.split('.')
+            if splitted[-1]=='request':
+                id=file.split('.')[-3] #id section
+            else:
+                id=file.split('.')[-2] #id section
+            id=int(id)
+            cur.execute('INSERT OR IGNORE INTO used_ids VALUES (?);', (id,))
+    cur.execute("COMMIT;")
+    conn.commit()
+    
+    cur.execute("BEGIN TRANSACTION;")
+    for root, dirs, files in os.walk('cache/'):
+        for file in files:
+            id=file.split('.')[-2] #id section
+            id=int(id)
+            filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
+            cur.execute('INSERT INTO cached_files VALUES (?,?);', (id,filepath))
+    cur.execute("COMMIT;")
+    conn.commit()
+    
+    cur.execute('''
+        SELECT fullpath FROM cached_files
+        LEFT JOIN used_ids
+        ON used_ids.id = cached_files.id
+        WHERE used_ids.id IS NULL;''')
+    for (filename, ) in cur:
+        with suppress(FileNotFoundError):
+            os.remove(filename)
     
 def validate_format(format):
     post = {i:i for i in constants.DEFAULT_SLOTS}
@@ -470,3 +611,39 @@ def validate_format(format):
         dummy = format.format(**post)
     except:
         printer.change_warning(f"Invalid format: {format}")
+
+
+def get_blocked_posts():
+    os.makedirs("to_blocked_posts", exist_ok=True)
+    
+    #Создаём файл, если он был случайно удалён,
+    #Или просто ничего не делаем
+    with open("blocked_posts.txt" , "a"):
+        pass
+    
+    blocked_ids = set()
+    with open("blocked_posts.txt" , "r") as f:
+        for line in f:
+            blocked_ids.add(int(line))
+    
+    for root, dirs, files in os.walk('to_blocked_posts/'):
+        for file in files:
+            splitted=file.split('.')
+            if splitted[-1]=='request':
+                id=file.split('.')[-3] #id section
+            else:
+                id=file.split('.')[-2] #id section
+            id=int(id)
+            blocked_ids.add(id)
+    
+    with open("blocked_posts_new.txt" , "w") as f:
+        for id in sorted(blocked_ids):
+            print(id, file=f)
+            
+    os.replace("blocked_posts_new.txt", "blocked_posts.txt")
+    for root, dirs, files in os.walk('to_blocked_posts/'):
+        for file in files:
+            filepath='{}/{}'.format(root,file)
+            os.remove(filepath)
+            
+    return blocked_ids

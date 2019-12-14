@@ -30,7 +30,8 @@ class Post:
                 value='_'.join(unescape(value))
             if key in self.__slots__:
                 setattr(self, key, value)
-
+        
+        #TODO: Never use days_ago, only attrs['created_at']['s']
         self.days_ago=(datetime.now()-datetime.fromtimestamp(attrs['created_at']['s'])).days
         self.tags = self.tags.split() + metatags
         

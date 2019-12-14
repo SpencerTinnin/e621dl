@@ -1,4 +1,4 @@
-VERSION = '5.6.2'
+VERSION = '5.7.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
@@ -16,12 +16,17 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;; GENERAL  ;;
 ;;;;;;;;;;;;;;
 
-;These are default values
+;Meaning of these setting described
+;In the README.md in Section [Settings]
+;These settings are all false by default
 ;[Settings]
 ;include_md5 = false
 ;make_hardlinks = true
 ;make_cache = true
 ;db = true
+;offline = true
+;prune_downloads = true
+;prune_cache = true
 
 ;These are default settings for all search groups below
 ;[Defaults]
