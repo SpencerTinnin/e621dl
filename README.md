@@ -6,7 +6,7 @@
 
 # How does **e621dl** work?
 
-Put very simply, when **e621dl** starts, it determines the following based on the `config.ini` file:
+Put very simply, when **e621dl** starts, it determines the following based on config files:
 
 - Which tags you would like to avoid seeing by reading the blacklist section.
 - Which searches you would like to perform by reading your search group sections.
@@ -29,7 +29,7 @@ Main features of this fork:
 - **`order:` metatag family support**. With max downloads limit you can get e.g. top 10 most rated or top 25 least favorite.
 - **Multithreaded**. 
 - **Folder pruning**. All files that are no longer required can be removed on next run. This is **not** a default behavior.
-- Easy blacklisting. Just move files you don't wanna see again to a special folder, and you won't. The files will also be removed from the folder.
+- Easy post blacklisting. Just move files you don't wanna see again to a special folder, and you won't. The files will also be removed from the folder.
 
 # Installing and Setting Up **e621dl**
 
@@ -73,16 +73,16 @@ Settings > Update & Security > For Developers and select "Developer mode". Detai
 The first time you run **e621dl**, you will see the following:
 
 ```
-status: Just starting
-checked tag: None so far
-posts so far: None so far
-last file downloaded: None so far
-current section: None so far
-last warning: None so far
-[!] New default config file created. Please add tag groups to this file.
+[!] New default config file created in folder 'config'.
+Please add tag groups to this file.
+You can add additional config files,
+they will be processed in natural order:
+https://en.wikipedia.org/wiki/Natural_sort_order
 ```
 
-This is normal behavior for a first run, and should not raise any alarm. **e621dl** is telling you that it was unable to find a `config.ini` file, so a generic one was created.
+This is normal behavior for a first run, and should not raise any alarm. **e621dl** is telling you that it was unable to find a `configs` folder, so a new was made along with a generic config file.
+
+You can rename this config, also you can add more, they will run one by one in [Natural order](https://en.wikipedia.org/wiki/Natural_sort_order). You can use it to e.g. download only some images first and create a database (see below), and download everything else on second config.
 
 ## Add search groups to the config file.
 
@@ -276,20 +276,21 @@ One side effect of the workaround used to search an unlimited number tags is tha
 
 ### Search Group Keys, Values, and Descriptions
 
-| Key           | Acceptable Values                   | Description                                                  |
-| ------------- | ----------------------------------- | ------------------------------------------------------------ |
-| []            | Nearly Anything                     | The search group name which will be used to title console output and name folders. See above for restrictions. |
-| days          | Integer from `1` to ∞               | How many days into the past to check for new posts.          |
-| ratings       | Characters `s`, `q`, and/or `e`     | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
-| min_score     | Integer from -∞ to ∞                | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
-| min_favs      | Integer from 0 to ∞                 | Same as _min_score_, but for favorites.                      |
-| tags          | Nearly Anything                     | Tags which will be used to perform the post search. See above for restrictions. |
-| blacklisted   | Nearly Anything                     | Essentially the same as _-tags_ at the and of a tag list.    |
-| post_source   | `api` or `db`                       | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
-| condition     | Nearly Anything                     | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
-| max_downloads | Integer from `1` to ∞               | Limits number of downloaded posts in addition to time of upload. |
-| format        | see below                           | Allows to format filename beside id.extension. See below for details |
-| subfolders    | search group names, space separated | all posts that correspond to searches in the subfolder and to current search are placed in the subfolder and not in main folder. See below for details |
+| Key                                 | Acceptable Values                   | Description                                                  |
+| ----------------------------------- | ----------------------------------- | ------------------------------------------------------------ |
+| []                                  | Nearly Anything                     | The search group name which will be used to title console output and name folders. See above for restrictions. |
+| days                                | Integer from `1` to ∞               | How many days into the past to check for new posts.          |
+| ratings                             | Characters `s`, `q`, and/or `e`     | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
+| min_score                           | Integer from -∞ to ∞                | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
+| min_favs                            | Integer from 0 to ∞                 | Same as _min_score_, but for favorites.                      |
+| tags                                | Nearly Anything                     | Tags which will be used to perform the post search. See above for restrictions. |
+| blacklisted                         | Nearly Anything                     | Essentially the same as _-tags_ at the and of a tag list.    |
+| post_source                         | `api` or `db`                       | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
+| condition                           | Nearly Anything                     | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
+| max_downloads                       | Integer from `1` to ∞               | Limits number of downloaded posts in addition to time of upload. |
+| format                              | see below                           | Allows to format filename beside id.extension. See below for details |
+| subfolders                          | search group names, space separated | all posts that correspond to searches in the subfolder and to current search are placed in the subfolder and not in main folder. See below for details |
+| blacklist_default_subfolders = true | true/false                          | if true, subfolders from `Defaults` won't be appended to this section's `subfolders` |
 
 ### Conditions
 
@@ -647,8 +648,8 @@ Settings for e621dl. All settings are boolean values that accept `true` or `fals
 | make_cache      | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
 | db              | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
 | offline         | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. |
-| prune_downloads | If `true`, all files in `downloads` that do not meet any of search criteria will be removed. It's as if you removed everything and then download only what you need. |
-| prune_cache     | If you have a cache folder and if `true` , than any files that has not a single copy/hardlink in `downloads ` will be deleted. It's as if we manually removed all files in the cache and then copied it from downloads. |
+| prune_downloads | If `true` in at least one of config files, all files in `downloads` that do not meet any of search criteria will be removed after all configs are processed. It's as if you removed everything and then download only what you need. |
+| prune_cache     | If you have a cache folder and if `true` in at least one of config files , than any files that has not a single copy/hardlink in `downloads ` will be deleted after all configs are processed. It's as if we manually removed all files in the cache and then copied it from downloads. |
 
 
 
@@ -725,11 +726,13 @@ not found on e621 : None so far
 
 *Posts* so far shows how many posts are processed from api so far. Mostly here to show that the app is still working. It can lag a bit if a lot of new files are in download queue.
 
-*Last* file downloaded shows what file has just been downloaded and where. Only files that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
+*Recent file downloaded*  shows what file has just been downloaded and where. Only files that are actually downloaded will generate text. Every skipped or duplicated will not generate anything.
 
-*Current* section shows which search group is processed now. If you use `prefilter`, only `prefilter` should be here.
+*Сurrent config* shows config file that is being processed now.
 
-*Last* warning shows last non-critical info and is mostly for troubleshooting.
+*Current section*  shows which search group is processed now.
+
+*Recent warning*  shows last non-critical info and is mostly for troubleshooting.
 
 *Connection retries* shows how often connections was reopened. This could happen because your ISP reconnected, you pc went into sleep mode/hybernate, your network cable was unplugged or WiFi loosed signal. After 100 retries e621dl will be closed.
 

@@ -351,7 +351,6 @@ def download_post(url, path, session, cachefunc, duplicate_func):
 
         else:
             os.remove(path)
-            printer.change_warning(f"Error code {response.status_code} with {url}")
             return False
 
     for i in range(1,100):

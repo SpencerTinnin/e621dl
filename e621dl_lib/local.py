@@ -3,19 +3,22 @@ import configparser
 import datetime
 import os
 import atexit
-from threading import Lock, Condition
+import sys
+from threading import Thread, Lock, Condition
 from collections import deque
 import sqlite3
 import pickle
 from time import sleep
 from functools import lru_cache
 import hashlib
-from threading import Thread
-from shutil import get_terminal_size
+from shutil import get_terminal_size, move
 from contextlib import contextmanager, suppress
+import glob
+import re
 
 # External Imports
 import colorama
+from natsort import natsorted
 
 # Personal Imports
 from . import constants
@@ -32,19 +35,19 @@ class StatPrinter(Thread):
         
         self.lines = {'status' : 'Just starting',
                       'checked tag' : 'None so far',
-                      'posts so far' : 0,
-                      'last file downloaded' : 'None so far',
+                      'current config' : 'None so far',
                       'current section' : 'None so far',
-                      'last warning' : 'None so far',
+                      'recent warning' : 'None so far',
+                      'recent file downloaded' : 'None so far',
                       'connection retries' : 0,
+                      'posts so far' : 0,
                       'already exist': 0,
                       'downloaded' : 0,
                       'copied' : 0,
                       'filtered' : 0,
                       'not found on e621' : 0,
                       }
-        
-        
+
     def stop(self):
         self._is_running = False
         
@@ -65,8 +68,7 @@ class StatPrinter(Thread):
         for k,v in self.lines.items():
             v = 'None so far' if v == 0 else v
             print(f"{k}: {v}"[:columns])
-        
-        
+
     def run(self):
 
         while self._is_running:
@@ -83,13 +85,16 @@ class StatPrinter(Thread):
         self.messages.append({'checked tag' : text})
     
     def change_file(self, text):
-        self.messages.append({'last file downloaded' : text})
+        self.messages.append({'recent file downloaded' : text})
 
+    def change_config(self, text):
+        self.messages.append({'current config' : text})
+    
     def change_section(self, text):
         self.messages.append({'current section' : text})
     
     def change_warning(self, text):
-        self.messages.append({'last warning' : text})
+        self.messages.append({'recent warning' : text})
     
     def increment_retries(self):
         self._increments.append(('connection retries', 1))
@@ -222,14 +227,64 @@ class DownloadQueue:
     def check_config_hash(self, hash):
         with self._lock:
             if self.config_hash != hash:
-                if self._deque or not self.completed:
-                    printer.change_warning("config.ini changed, resetting saved queue")
                 self.reset()
                 self.config_hash = hash
             
     def in_gens(self, name):
         with self._lock:
             return name in self.completed_deque
+
+class ConfigQueue:
+    def __init__(self):
+        #Because we can 
+        self._lock = Lock()
+        try:
+            self.load()
+        except:
+            self.reset()
+
+    def save(self):
+        with self._lock:
+            with open('config_queue.pickle', 'wb') as config_queue_file:
+                pickle.dump((
+                             self.config_set,
+                             self.completed_set,
+                             self.reset_filedb,
+                            ), config_queue_file, protocol=pickle.HIGHEST_PROTOCOL)
+                
+    def load(self):
+        with self._lock:
+            with open('config_queue.pickle', 'rb') as config_queue_file:
+                (self.config_set,
+                 self.completed_set,
+                 self.reset_filedb,) = pickle.load(config_queue_file)
+
+    def reset(self):
+        with self._lock:
+            self.config_set=set()
+            self.completed_set=set()
+            self.reset_filedb = True
+        
+    def change_if_not_same(self, new_set):
+        with self._lock:
+            if new_set != self.config_set:
+                self.config_set=new_set
+                self.completed_set=set()
+                self.reset_filedb = True
+        
+    def reset_if_complete(self):
+        with self._lock:
+            if self.config_set == self.completed_set:
+                self.completed_set = set()
+                self.reset_filedb = True
+    
+    def add(self, config):
+        with self._lock:
+            self.completed_set.add(config)
+            
+    def get_remaining(self):
+        with self._lock:
+            return natsorted(self.config_set - self.completed_set)
 
 class PostsStorage:
     def __init__(self):
@@ -421,11 +476,17 @@ def tags_and_source_template(line):
 
 
 def make_config():
-    with open('config.ini', 'wt', encoding = 'utf_8_sig') as outfile:
+    with open('configs/config.ini', 'wt', encoding = 'utf_8_sig') as outfile:
         outfile.write(constants.DEFAULT_CONFIG_TEXT)
-    printer.show(False)
-    print("[!] New default config file created. Please add tag groups to this file.")
-    raise SystemExit
+    printer.stop()
+    printer.join()
+    printer.reset_screen()
+    print("[!] New default config file created in folder 'configs'.")
+    print("Please add tag groups to this file.")
+    print("You can add additional config files,")
+    print("they will be processed in natural order:")
+    print("https://en.wikipedia.org/wiki/Natural_sort_order")
+    sys.exit()
 
 def filehash(filename):
     hash = hashlib.md5()
@@ -433,17 +494,27 @@ def filehash(filename):
         hash.update(f.read())
     return hash.hexdigest()
 
-def get_config():
+def get_configs():
+    if not os.path.isdir('configs'):
+        os.mkdir('configs')
+        if os.path.isfile('config.ini'):
+            move('config.ini', 'configs/configs.ini')
+            printer.change_warning("[!] config.ini was moved to 'config' folders")
+        else:
+            make_config()
+            return set()
+            
+    return set(glob.glob('configs/*.ini'))
+        
+    
+def get_config(filename='config.ini'):
     config = configparser.ConfigParser()
 
-    if not os.path.isfile('config.ini'):
-        printer.change_warning("[!] No config file found.")
-        make_config()
 
-    with open('config.ini', 'rt', encoding = 'utf_8_sig') as infile:
+    with open(filename, 'rt', encoding = 'utf_8_sig') as infile:
         config.read_file(infile)
 
-    return config, filehash('config.ini')
+    return config, filehash(filename)
 
 def get_date(days_to_check):
     ordinal_check_date = datetime.date.today().toordinal() - (days_to_check - 1)
@@ -463,8 +534,17 @@ def substitute_illegals(char):
     return char
 
 def substitute_illegals_filename(filename):
-    illegals = [':', '*', '?', '\"', '<', '>', '|', '\\', '/']
-    return ''.join([char if char not in illegals else '_' for char in filename])
+    illegals = {':'  : 'ː',
+                '*'  : '❋',
+                '\"' : 'ᐦ',
+                '?'  : 'ʔ', 
+                '<'  : 'ᐸ', 
+                '>'  : 'ᐳ', 
+                '|'  : '╎', 
+                '\\' : '╲', 
+                '/'  : '╱'}
+    
+    return ''.join([char if char not in illegals else illegals[char] for char in filename])
 
 @lru_cache(maxsize=512, typed=False)
 def make_new_dir(dir_name):
@@ -481,63 +561,61 @@ def make_cache_folder():
     except FileExistsError:
         pass
     
-def get_files_dict(have_cache, make_new_files):
+IMAGE_MATCH =  re.compile(r".*?(\d+?)\.(?:jpg|png|gif|swf|webm)")
+    
+def get_files_dict(reset_filedb):
+    #args = [arg.strip().lower() for arg in sys.argv]
     filedict={}
-    if have_cache:
-        for root, dirs, files in os.walk('cache/'):
-            for file in files:
+
+    for root, dirs, files in os.walk('cache/'):
+        for file in files:
+            try:
                 id=file.split('.')[-2] #id section
                 id=int(id)
                 filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
                 filedict[id]=filepath
-
+            except (IndexError,ValueError):
+                pass
+                    
     conn = sqlite3.connect('files.db', isolation_level=None)
     cur = conn.cursor()
-    cur.executescript(
-        '''
-        BEGIN TRANSACTION;
-        DROP TABLE IF EXISTS old_files;
-        
-        CREATE TABLE old_files (
-            fullpath    TEXT PRIMARY KEY
-                           UNIQUE
-                           NOT NULL
-        ) WITHOUT ROWID;
-        
-        COMMIT;
-        '''
-    )
 
-    if make_new_files:
+    if reset_filedb:
         cur.executescript(
-        '''
-        BEGIN TRANSACTION;
-        DROP TABLE IF EXISTS new_files;
-        
-        CREATE TABLE new_files (
-            fullpath    TEXT PRIMARY KEY
-                           UNIQUE
-                           NOT NULL
-        ) WITHOUT ROWID;
-        
-        COMMIT;
-        '''
+            '''
+            BEGIN TRANSACTION;
+            DROP TABLE IF EXISTS old_files;
+            
+            CREATE TABLE old_files (
+                fullpath    TEXT PRIMARY KEY
+                               UNIQUE
+                               NOT NULL
+            ) WITHOUT ROWID;
+            
+            DROP TABLE IF EXISTS new_files;
+            
+            CREATE TABLE new_files (
+                fullpath    TEXT PRIMARY KEY
+                               UNIQUE
+                               NOT NULL
+            ) WITHOUT ROWID;
+            
+            COMMIT;
+            '''
         )
     
     conn.commit()
     cur.execute("BEGIN TRANSACTION;")
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
-            splitted=file.split('.')
-            if splitted[-1]=='request':
-                id=file.split('.')[-3] #id section
-            else:
-                id=file.split('.')[-2] #id section
-            id=int(id)
-            filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
-            if id not in filedict:
-                filedict[id]=filepath
-            cur.execute('INSERT INTO old_files VALUES (?);', (filepath,))
+            match = IMAGE_MATCH.match(file)
+            if match:
+                id=int(match[1])
+                filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
+                if id not in filedict:
+                    filedict[id]=filepath
+                if reset_filedb:
+                    cur.execute('INSERT INTO old_files VALUES (?);', (filepath,))
     cur.execute("COMMIT;")
     conn.commit()
     
@@ -576,23 +654,23 @@ def prune_cache():
     cur.execute("BEGIN TRANSACTION;")
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
-            splitted=file.split('.')
-            if splitted[-1]=='request':
-                id=file.split('.')[-3] #id section
-            else:
-                id=file.split('.')[-2] #id section
-            id=int(id)
-            cur.execute('INSERT OR IGNORE INTO used_ids VALUES (?);', (id,))
+            match = IMAGE_MATCH.match(file)
+            if match:
+                id=int(match[1])
+                cur.execute('INSERT OR IGNORE INTO used_ids VALUES (?);', (id,))
     cur.execute("COMMIT;")
     conn.commit()
     
     cur.execute("BEGIN TRANSACTION;")
     for root, dirs, files in os.walk('cache/'):
         for file in files:
-            id=file.split('.')[-2] #id section
-            id=int(id)
-            filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
-            cur.execute('INSERT INTO cached_files VALUES (?,?);', (id,filepath))
+            try:
+                id=file.split('.')[-2] #id section
+                id=int(id)
+                filepath='{}/{}'.format(root.replace('\\','/').lower(),file)
+                cur.execute('INSERT INTO cached_files VALUES (?,?);', (id,filepath))
+            except (IndexError, ValueError):
+                pass
     cur.execute("COMMIT;")
     conn.commit()
     
@@ -628,13 +706,10 @@ def get_blocked_posts():
     
     for root, dirs, files in os.walk('to_blocked_posts/'):
         for file in files:
-            splitted=file.split('.')
-            if splitted[-1]=='request':
-                id=file.split('.')[-3] #id section
-            else:
-                id=file.split('.')[-2] #id section
-            id=int(id)
-            blocked_ids.add(id)
+            match = IMAGE_MATCH.match(file)
+            if match:
+                id=int(match[1])
+                blocked_ids.add(id)
     
     with open("blocked_posts_new.txt" , "w") as f:
         for id in sorted(blocked_ids):
@@ -647,3 +722,10 @@ def get_blocked_posts():
             os.remove(filepath)
             
     return blocked_ids
+
+def remove_empty_folders():
+    for root, dirs, files in os.walk('downloads/', topdown=False):
+        try:
+            os.rmdir(root)
+        except (OSError, FileNotFoundError):
+            pass
