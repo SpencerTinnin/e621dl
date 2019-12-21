@@ -57,6 +57,7 @@ You must install all of this program's python dependencies for it to run properl
 The required packages for **e621dl** are currently:
 - [requests](https://python-requests.org)
 - [colorama](https://github.com/tartley/colorama)
+- [natsort](https://github.com/SethMMorton/natsort)
 
 Open your command shell in the directory you decompressed e621dl into, and run the command `py e621dl.py`. Depending on your system, the command `py` may default to Python 2. In this case you should run `py -3 e621dl.py`. Sometimes, your system may not recognize the `py` command at all. In this case you should run `python3 e621dl.py`. In some cases where Python 3 was the first installed version of Python, the command `python e621dl.py` will be used. On Windows, if you associated python with *.py files during python installation, you can just double click on e621.py or in commandline enter `e621dl.py`.
 
@@ -276,21 +277,21 @@ One side effect of the workaround used to search an unlimited number tags is tha
 
 ### Search Group Keys, Values, and Descriptions
 
-| Key                                 | Acceptable Values                   | Description                                                  |
-| ----------------------------------- | ----------------------------------- | ------------------------------------------------------------ |
-| []                                  | Nearly Anything                     | The search group name which will be used to title console output and name folders. See above for restrictions. |
-| days                                | Integer from `1` to ∞               | How many days into the past to check for new posts.          |
-| ratings                             | Characters `s`, `q`, and/or `e`     | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
-| min_score                           | Integer from -∞ to ∞                | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
-| min_favs                            | Integer from 0 to ∞                 | Same as _min_score_, but for favorites.                      |
-| tags                                | Nearly Anything                     | Tags which will be used to perform the post search. See above for restrictions. |
-| blacklisted                         | Nearly Anything                     | Essentially the same as _-tags_ at the and of a tag list.    |
-| post_source                         | `api` or `db`                       | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
-| condition                           | Nearly Anything                     | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
-| max_downloads                       | Integer from `1` to ∞               | Limits number of downloaded posts in addition to time of upload. |
-| format                              | see below                           | Allows to format filename beside id.extension. See below for details |
-| subfolders                          | search group names, space separated | all posts that correspond to searches in the subfolder and to current search are placed in the subfolder and not in main folder. See below for details |
-| blacklist_default_subfolders = true | true/false                          | if true, subfolders from `Defaults` won't be appended to this section's `subfolders` |
+| Key                          | Acceptable Values                   | Description                                                  |
+| ---------------------------- | ----------------------------------- | ------------------------------------------------------------ |
+| []                           | Nearly Anything                     | The search group name which will be used to title console output and name folders. See above for restrictions. |
+| days                         | Integer from `1` to ∞               | How many days into the past to check for new posts.          |
+| ratings                      | Characters `s`, `q`, and/or `e`     | Acceptable explicitness ratings for downloaded posts. Characters stand for safe, questionable, and explicit, respectively. |
+| min_score                    | Integer from -∞ to ∞                | Lowest acceptable score for downloaded posts. Posts with higher scores than this number will also be downloaded. |
+| min_favs                     | Integer from 0 to ∞                 | Same as _min_score_, but for favorites.                      |
+| tags                         | Nearly Anything                     | Tags which will be used to perform the post search. See above for restrictions. |
+| blacklisted                  | Nearly Anything                     | Essentially the same as _-tags_ at the and of a tag list.    |
+| post_source                  | `api` or `db`                       | If `api`, e621 will be used to search and filter posts and files. If `db`, links to files from local database will be used. See below for details. |
+| condition                    | Nearly Anything                     | If you need for a fine-grained filter, you can use boolean conditions where `&` means `and`, `|` means `or` and `-` means `not`. See below for details. |
+| max_downloads                | Integer from `1` to ∞               | Limits number of downloaded posts in addition to time of upload. |
+| format                       | see below                           | Allows to format filename beside id.extension. See below for details |
+| subfolders                   | search group names, space separated | all posts that correspond to searches in the subfolder and to current search are placed in the subfolder and not in main folder. See below for details |
+| blacklist_default_subfolders | true/false                          | if true, subfolders from `Defaults` won't be appended to this section's `subfolders` |
 
 ### Conditions
 
