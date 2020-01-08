@@ -87,7 +87,7 @@ def retrying_post(s, *args, **kwargs):
 def check_cloudflare(response):
     if response.status_code != 403:
         return False
-    elif not response.text.lower().find("cloudflare"):
+    elif not response.text.lower().find("cloudflare") >= 0:
         return False
     else:
         return True

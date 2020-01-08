@@ -16,6 +16,10 @@ from e621dl_lib import constants
 from e621dl_lib import local
 from e621dl_lib import remote
 
+# External Imports
+
+from requests.exceptions import HTTPError
+
 download_queue = local.DownloadQueue()
 config_queue = local.ConfigQueue()
 
@@ -161,10 +165,19 @@ def prefilter_build_index(kwargses, use_db, searches):
             last_id = 0x7F_FF_FF_FF
             download_queue.completed_gen(directory)
         download_queue.completed = True
+    except HTTPError as e:
+        local.printer.show(False)
+        local.printer.stop()
+        local.printer.join()
+        local.printer.reset_screen()
+        print("Exception in api iterator:")
+        print_exc()
+        print("Http Status: ", e.response.status_code)
+        print("Text: ", e.response.text)
     except:
         local.printer.show(False)
         local.printer.stop()
-        sleep(0.101)
+        local.printer.join()
         local.printer.reset_screen()
         print("Exception in api iterator:")
         print_exc()
@@ -473,7 +486,7 @@ def process_config(filename, session, files, pathes_storage):
                             section_append_func = storage.append
             
             section_tags += ['-'+tag for tag in blacklist+section_blacklisted]
-            section_search_tags = section_tags[:5]
+            section_search_tags = [tag for tag in section_tags if '*' not in tag][:5]
             section_blacklist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_blacklist+section_blacklisted]
             section_whitelist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_whitelist]
             section_anylist = [re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_anylist]
