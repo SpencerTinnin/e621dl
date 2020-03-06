@@ -526,6 +526,7 @@ def get_date(days_to_check):
 
     return datetime.date.fromordinal(ordinal_check_date).strftime('%Y-%m-%d')
 
+#TODO: Replace this all with translate
 def substitute_illegals(char):
     illegals = [':', '*', '?', '\"', '<', '>', '|']
     path_chars = ['\\', '/']

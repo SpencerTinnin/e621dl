@@ -30,6 +30,7 @@ Main features of this fork:
 - **Multithreaded**. 
 - **Folder pruning**. All files that are no longer required can be removed on next run. This is **not** a default behavior.
 - Easy post blacklisting. Just move files you don't wanna see again to a special folder, and you won't. The files will also be removed from the folder.
+- **Authorization via e621 API key**.
 
 # Installing and Setting Up **e621dl**
 
@@ -105,6 +106,8 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;offline = true
 ;prune_downloads = true
 ;prune_cache = true
+;login = your e621 login
+;api_key = your e621 api key generated in account settings
 
 ;These are default settings for all search groups below
 ;[Defaults]
@@ -651,6 +654,8 @@ Settings for e621dl. All settings are boolean values that accept `true` or `fals
 | offline         | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. |
 | prune_downloads | If `true` in at least one of config files, all files in `downloads` that do not meet any of search criteria will be removed after all configs are processed. It's as if you removed everything and then download only what you need. |
 | prune_cache     | If you have a cache folder and if `true` in at least one of config files , than any files that has not a single copy/hardlink in `downloads ` will be deleted after all configs are processed. It's as if we manually removed all files in the cache and then copied it from downloads. |
+| login           | Your e621 login                                              |
+| api_key         | Your API key, generated in "Account" > "Manage API Access"   |
 
 
 

@@ -102,7 +102,7 @@ def get_directories(post, root_dirs, search, searches_dict):
         return results
     
 
-def get_files(post, filename, directories, files, session, cachefunc, duplicate_func, download_post, search):
+def get_files(post, filename, directories, files, session, cachefunc, duplicate_func, download_post, search, api_key, login):
     with download_set.context_id(post.id):
 
         
@@ -116,7 +116,7 @@ def get_files(post, filename, directories, files, session, cachefunc, duplicate_
                 duplicate_func(files[file_id], path)
                 local.printer.increment_copied()
             else:
-                if download_post(post.file_url, path, session, cachefunc, duplicate_func):
+                if download_post(post.file_url, path, session, cachefunc, duplicate_func, api_key, login):
                     files[file_id]=path
                     local.printer.increment_downloaded()
                 else:
@@ -162,7 +162,7 @@ def prefilter_build_index(kwargses, use_db, searches):
                 
                 if not any(s for s in searches if s['posts_countdown'] > 0):
                     break
-            last_id = 0x7F_FF_FF_FF
+            last_id = None
             download_queue.completed_gen(directory)
         download_queue.completed = True
     except HTTPError as e:
@@ -287,6 +287,8 @@ def process_config(filename, session, files, pathes_storage):
     full_offline = False
     prune_downloads = False
     prune_cache = False
+    api_key = None
+    login = None
     # Iterate through all sections (lines enclosed in brackets: []).
     for section in config.sections():
 
@@ -314,7 +316,11 @@ def process_config(filename, session, files, pathes_storage):
                         prune_downloads = True
                 elif option.lower() in {'prune_cache'}:
                     if value.lower() == 'true':
-                        prune_cache = True                    
+                        prune_cache = True                
+                elif option.lower() in {'password', 'api_key', 'key'}:
+                        api_key = value.strip().lower()
+                elif option.lower() in {'login', 'username', 'name'}:
+                        login = value.strip().lower()
                 
         if section.lower() == 'settings':
             for option, value in config.items(section):
@@ -323,8 +329,8 @@ def process_config(filename, session, files, pathes_storage):
                         default_gen_func=storage.gen
                         default_append_func = lambda x: None
                         
-                        get_tag_alias = lambda _tag, _session: _tag
-                        download_post = lambda _file_url, _path, _session, _cachefunc, _duplicate_func : False
+                        get_tag_alias = lambda _tag, _api_key, _login, _session: _tag
+                        download_post = lambda _file_url, _path, _session, _cachefunc, _duplicate_func, _api_key, _login : False
                         
                         use_db = True
                         allow_append = False
@@ -365,7 +371,7 @@ def process_config(filename, session, files, pathes_storage):
         elif section.lower() == 'blacklist':
             for option, value in config.items(section):
                 if option.lower() in {'tags', 'tag'}:
-                    blacklist = [get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                    blacklist = [get_tag_alias(tag.lower(), api_key, login, session) for tag in value.replace(',', ' ').lower().strip().split()]
 
     # Making use of include_md5
     if include_md5 and len(default_format) == 0:
@@ -441,7 +447,7 @@ def process_config(filename, session, files, pathes_storage):
 
                 # Get the tags that will be searched for. Tags are aliased to their acknowledged names.
                 if option.lower() in {'tags', 'tag'}:
-                    section_tags = [get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                    section_tags = [get_tag_alias(tag.lower(), api_key, login, session) for tag in value.replace(',', ' ').lower().strip().split()]
                     section_blacklist += [tag[1:] for tag in section_tags if tag[0]=='-']
                     section_anylist   += [tag[1:] for tag in section_tags if tag[0]=='~']
                     section_whitelist += [tag for tag in section_tags if tag[0] not in ('-','~')]
@@ -454,7 +460,7 @@ def process_config(filename, session, files, pathes_storage):
                     section_date = local.get_date(section_days_ago)
                     max_days_ago = max(max_days_ago, section_days_ago)
                 elif option.lower() in {'blacklist', 'blacklist_tags', 'blacklisted'}:
-                    section_blacklisted = [get_tag_alias(tag.lower(), session) for tag in value.replace(',', ' ').lower().strip().split()]
+                    section_blacklisted = [get_tag_alias(tag.lower(), api_key, login, session) for tag in value.replace(',', ' ').lower().strip().split()]
                 elif option.lower() in {'min_score', 'score'}:
                     section_score = int(value)
                 elif option.lower() in {'min_favs', 'favs'}:
@@ -473,7 +479,7 @@ def process_config(filename, session, files, pathes_storage):
                 elif option.lower() in {'condition', 'conditions'}:
                     if value.lower().strip():
                         source_template, tags = local.tags_and_source_template(value.lower().strip())
-                        tags = [get_tag_alias(tag.lower(), session) for tag in tags]
+                        tags = [get_tag_alias(tag.lower(), api_key, login, session) for tag in tags]
                         section_cond_func = local.make_check_funk(source_template, tags)
                 elif option.lower() in {'posts_from', 'posts_func', 'posts_source', 'post_from', 'post_func', 'post_source'}:
                     if value.lower() in {'db','database','local'}:
@@ -486,7 +492,8 @@ def process_config(filename, session, files, pathes_storage):
                             section_append_func = storage.append
             
             section_tags += ['-'+tag for tag in blacklist+section_blacklisted]
-            section_search_tags = [tag for tag in section_tags if '*' not in tag][:5]
+            #section_search_tags = [tag for tag in section_tags if '*' not in tag][:38]
+            section_search_tags = section_tags[:constants.MAX_USER_SEARCH_TAGS]
             section_blacklist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_blacklist+section_blacklisted]
             section_whitelist=[re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_whitelist]
             section_anylist = [re.compile(re.escape(mask).replace('\\*','.*')) for mask in section_anylist]
@@ -522,7 +529,9 @@ def process_config(filename, session, files, pathes_storage):
                              'format':section_format,
                              'subdirectories': section_subdirectories,
                              'session'  : session,
-                             'has_actual_search': section_has_actual_search,}
+                             'has_actual_search': section_has_actual_search,
+                             'login': login,
+                             'api_key': api_key,}
             
             if is_prefilter(section_id):
                 prefilter.append(section_dict)
@@ -535,7 +544,7 @@ def process_config(filename, session, files, pathes_storage):
     local.printer.change_status("Checking for partial downloads")
 
     if not full_offline:
-        remote.finish_partial_downloads(session, cachefunc, duplicate_func)
+        remote.finish_partial_downloads(session, cachefunc, duplicate_func, api_key, login)
     
     
     
@@ -596,7 +605,7 @@ def process_config(filename, session, files, pathes_storage):
                         pathes_storage.add_pathes(directories, filename)
                         futures.append(download_pool.submit(get_files,
                             post, filename, directories, files,
-                            session, cachefunc, duplicate_func, download_post, search))
+                            session, cachefunc, duplicate_func, download_post, search, api_key, login))
                         
                         search['posts_countdown'] -= 1
                     else:

@@ -1,4 +1,4 @@
-VERSION = '5.8.1'
+VERSION = '5.9.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
@@ -8,9 +8,16 @@ PARTIAL_DOWNLOAD_EXT = 'request'
 #aka (connect timeout, read timeout)
 CONNECTION_TIMEOUT = (6.1, 15.5)
 
+MAX_USER_SEARCH_TAGS = 38 #one for time tag, one for id tag
+
+# 'author' is a field I just don't know anything about
+# I'll leave it for now.
+# 'creator_id' is now 'uploader_id' in e621 API
 DEFAULT_SLOTS = ['id','tags','rating','md5','file_ext','file_url',
                  'score','fav_count','days_ago', 'sources', 'artist', 'description',
-                 'file_size', 'width', 'height', 'author', 'creator_id', 'created_at']
+                 'file_size', 'width', 'height', 'author',
+                 'creator_id', 'created_at', 'created_at_string', 
+                 'score_up', 'score_down', 'tag_ex', 'pools' ]
 
 DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;; GENERAL  ;;
@@ -27,6 +34,8 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;offline = true
 ;prune_downloads = true
 ;prune_cache = true
+;login = your e621 login
+;api_key = your e621 api key generated in account settings
 
 ;These are default settings for all search groups below
 ;[Defaults]
