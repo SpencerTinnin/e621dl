@@ -281,8 +281,7 @@ def get_posts(last_id, search_tags, earliest_date, session, api_key, login, **du
     while True:
         start = time()
         response = retrying_get(session, url, data=payload, timeout=TIMEOUT)
-        
-        
+
         while check_cloudflare(response):
             solve_captcha(session, response)
             elapsed = time() - start
@@ -306,7 +305,7 @@ def get_posts(last_id, search_tags, earliest_date, session, api_key, login, **du
             if payload['page'] > 750:
                 break
         else:
-            last_id = results[-1].id
+            last_id = posts_orig[-1]["id"]
             payload["tags"] = f"id:<{last_id} {tags}"
         
         elapsed = time() - start

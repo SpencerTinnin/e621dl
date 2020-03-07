@@ -196,7 +196,6 @@ def main():
     config_queue.reset_if_complete()
     
     local.printer.change_status("Building downloaded files dict")
-    files = local.get_files_dict(config_queue.reset_filedb)
     
     
     pathes_storage=local.PathesStorage()
@@ -318,7 +317,7 @@ def process_config(filename, session, files, pathes_storage):
                     if value.lower() == 'true':
                         prune_cache = True                
                 elif option.lower() in {'password', 'api_key', 'key'}:
-                        api_key = value.strip().lower()
+                        api_key = value.strip()
                 elif option.lower() in {'login', 'username', 'name'}:
                         login = value.strip().lower()
                 
@@ -546,7 +545,7 @@ def process_config(filename, session, files, pathes_storage):
     if not full_offline:
         remote.finish_partial_downloads(session, cachefunc, duplicate_func, api_key, login)
     
-    
+    files = local.get_files_dict(config_queue.reset_filedb)
     
     if prefilter:
         for pf in prefilter:
