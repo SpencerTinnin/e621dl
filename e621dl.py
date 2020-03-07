@@ -209,7 +209,7 @@ def main():
             config_name = '/'.join(config.replace('\\','/').split('/')[1:])
             local.printer.change_config(config_name)
             config_prune_downloads, config_prune_cache = \
-                process_config(config, session, files, pathes_storage)
+                process_config(config, session, pathes_storage)
             
             prune_downloads = prune_downloads or config_prune_downloads
             prune_cache = prune_cache or config_prune_cache
@@ -237,7 +237,7 @@ def main():
     
 
 #@profile
-def process_config(filename, session, files, pathes_storage):
+def process_config(filename, session, pathes_storage):
     # Create the requests session that will be used throughout the run.
     
     # local.printer.show(False)
