@@ -196,7 +196,7 @@ def main():
     config_queue.reset_if_complete()
     
     local.printer.change_status("Building downloaded files dict")
-    
+    files = local.get_files_dict(config_queue.reset_filedb)
     
     pathes_storage=local.PathesStorage()
     config_queue.reset_filedb = False
