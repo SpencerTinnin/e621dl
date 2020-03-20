@@ -18,7 +18,7 @@ from .local import printer
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from requests.exceptions import ConnectionError, ReadTimeout
+from requests.exceptions import ConnectionError, ReadTimeout, HTTPError
 
 TIMEOUT = constants.CONNECTION_TIMEOUT
 
@@ -458,13 +458,33 @@ def download_post(url, path, session, cachefunc, duplicate_func, api_key, login)
     return stream_download()
     
     
-def finish_partial_downloads(session, cachefunc, duplicate_func, api_key, login):
+def finish_partial_downloads(session, cachefunc, duplicate_func, filedict, api_key, login):
+    downloaded_files = []
     for root, dirs, files in os.walk('downloads/'):
         for file in files:
             if file.endswith(constants.PARTIAL_DOWNLOAD_EXT):
+                id = int(file.split('.')[-3])
+                path = os.path.join(root, file)
+                newpath=path.replace(f".{constants.PARTIAL_DOWNLOAD_EXT}", '')
+
+                if os.path.exists(newpath):
+                    os.remove(path)
+                    continue
+                    
+                elif id in filedict:
+                    os.remove(path)
+                    duplicate_func(filedict[id], newpath)
+                    continue
+                    
                 printer.change_warning(f" Partial download {file} found.")
 
-                path = os.path.join(root, file)
-                url = get_known_post(file.split('.')[-3], api_key, login, session)['file']['url']
+                try:
+                    url = get_known_post(id, api_key, login, session)['file']['url']
+                except HTTPError:
+                    os.remove(path)
+                    continue
 
-                download_post(url, path, session, cachefunc, duplicate_func, api_key, login)
+                if download_post(url, path, session, cachefunc, duplicate_func, api_key, login):
+                    downloaded_files.append(newpath)
+                    
+    return downloaded_files

@@ -82,7 +82,7 @@ def get_directories(post, root_dirs, search, searches_dict):
     
     # We travel below only if current folder matches
     # our criteria or there is nothing to look for
-    if search_result or not search['has_actual_search']:
+    if search_result or not search['has_actаual_search']:
         for directory in subdirectories:
             #preventing recursions in cases like cat/dog/cat/dog/...
             if directory in root_dirs:
@@ -100,7 +100,6 @@ def get_directories(post, root_dirs, search, searches_dict):
         return ['/'.join(root_dirs)]
     else:
         return results
-    
 
 def get_files(post, filename, directories, files, session, cachefunc, duplicate_func, download_post, search, api_key, login):
     with download_set.context_id(post.id):
@@ -121,9 +120,9 @@ def get_files(post, filename, directories, files, session, cachefunc, duplicate_
                     local.printer.increment_downloaded()
                 else:
                     local.printer.increment_not_found()
-                    return search, False
+                    return search, False, directories, filename
         
-        return search, True
+        return search, True, directories, filename
                 
 #@profile
 def prefilter_build_index(kwargses, use_db, searches):
@@ -186,33 +185,61 @@ def prefilter_build_index(kwargses, use_db, searches):
         if use_db:
             storage.close()
           
-          
+def global_config_options(configs):
+    for configname in configs:
+        config, hash = local.get_config(configname)
+        
+    prune_downloads = False
+    prune_cache = False
+    no_redownload = False
+    full_offlines = []
+    for section in config.sections():
+        # Get values from the "Settings" section. Currently only used for file name appending.
+        
+        if section.lower() == 'settings':
+            current_full_offline = False
+            for option, value in config.items(section):
+                if option.lower() in {'prune_downloads'}:
+                    if value.lower() == 'true':
+                        prune_downloads = True
+                elif option.lower() in {'prune_cache'}:
+                    if value.lower() == 'true':
+                        prune_cache = True
+                elif option.lower() in {'no_redownload', 'bOnlyProcessDownloaded', 'forbid_redownload'}:
+                    if value.lower() == 'true':
+                        no_redownload = True
+                if option.lower() in {'full_offline', 'offline'}:
+                    if value.lower() == 'true':
+                        current_full_offline = True
+            full_offlines.append(current_full_offline)
+    
+    full_offline = min(full_offlines)
+    return prune_downloads, prune_cache, no_redownload, full_offline
+        
 def main():
     #local.printer.show(False)
     local.printer.start()
     local.save_on_exit_events(download_queue.save)
     current_configs = local.get_configs()
+    
+    prune_downloads, prune_cache, no_redownload, dummy_full_offline =  global_config_options(current_configs)
+    
     config_queue.change_if_not_same(current_configs)
     config_queue.reset_if_complete()
     
     local.printer.change_status("Building downloaded files dict")
-    files = local.get_files_dict(config_queue.reset_filedb)
-    
+    files = local.get_files_dict(config_queue.reset_filedb, not no_redownload)
+    all_time_downloaded = local.get_all_time_downloaded()
     pathes_storage=local.PathesStorage()
     config_queue.reset_filedb = False
     config_queue.save()
-    prune_downloads = False
-    prune_cache = False
     
     with remote.requests_retry_session() as session:
+
         for config in config_queue.get_remaining():
             config_name = '/'.join(config.replace('\\','/').split('/')[1:])
             local.printer.change_config(config_name)
-            config_prune_downloads, config_prune_cache = \
-                process_config(config, session, pathes_storage)
-            
-            prune_downloads = prune_downloads or config_prune_downloads
-            prune_cache = prune_cache or config_prune_cache
+            process_config(config, session, pathes_storage, files, all_time_downloaded)
             
             config_queue.add(config)
             config_queue.save()
@@ -237,10 +264,8 @@ def main():
     
 
 #@profile
-def process_config(filename, session, pathes_storage):
+def process_config(filename, session, pathes_storage, files, all_time_downloaded):
     # Create the requests session that will be used throughout the run.
-    
-    # local.printer.show(False)
     
     
     
@@ -543,9 +568,10 @@ def process_config(filename, session, pathes_storage):
     local.printer.change_status("Checking for partial downloads")
 
     if not full_offline:
-        remote.finish_partial_downloads(session, cachefunc, duplicate_func, api_key, login)
-    
-    files = local.get_files_dict(config_queue.reset_filedb)
+        downloaded = remote.finish_partial_downloads(session, cachefunc, duplicate_func, files, api_key, login)
+        if downloaded:
+            local.append_files(files, downloaded)
+    # files = local.get_files_dict(config_queue.reset_filedb)
     
     if prefilter:
         for pf in prefilter:
@@ -591,15 +617,20 @@ def process_config(filename, session, pathes_storage):
                     if search['posts_countdown'] <= 0:
                         remaining_from_countdown.append( (search, post) )
                         continue
+
+                    if format:
+                        id_ext = f'{post.id}.{post.file_ext}'
+                        custom_prefix = format.format(**post.generate())[:100]
+                        filename = f'{custom_prefix}.{id_ext}'
+                    else:
+                        filename = f'{post.id}.{post.file_ext}'
                     
-                    directories = get_directories(post, [directory], search, searches_dict)
+                    unfiltered_directories = get_directories(post, [directory], search, searches_dict)
+                    directories = []
+                    for unfiltered_directory in unfiltered_directories:
+                        if pathes_storage.make_path(unfiltered_directory, filename) not in all_time_downloaded:
+                            directories.append(unfiltered_directory)
                     if directories:
-                        if format:
-                            id_ext = f'{post.id}.{post.file_ext}'
-                            custom_prefix = format.format(**post.generate())[:100]
-                            filename = f'{custom_prefix}.{id_ext}'
-                        else:
-                            filename = f'{post.id}.{post.file_ext}'
                         
                         pathes_storage.add_pathes(directories, filename)
                         futures.append(download_pool.submit(get_files,
@@ -611,6 +642,7 @@ def process_config(filename, session, pathes_storage):
                         local.printer.increment_filtered(1)
                 pathes_storage.commit()
                 
+                pathes_storage.begin()
                 for future in futures:
                     if future.exception():
                         raise future.exception()
@@ -618,10 +650,12 @@ def process_config(filename, session, pathes_storage):
                     #Recovering wrong countdown decrement
                     #Still not good and may lead to less post than
                     #max_posts. But better than it was
-                    search, success = future.result()
+                    search, success, directories, filename = future.result()
                     if not success:
                         search['posts_countdown'] += 1
-                
+                    else:
+                        pathes_storage.add_all_time_downloaded(directories, filename)
+                pathes_storage.commit()
                 results_pair = []
                 for search, post in remaining_from_countdown:
                     if search['posts_countdown'] > 0:
@@ -644,7 +678,7 @@ def process_config(filename, session, pathes_storage):
     if download_queue.completed:
         download_queue.reset()
     
-    return prune_downloads, prune_cache
+    return
     
     
     

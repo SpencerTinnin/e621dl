@@ -334,7 +334,11 @@ class PathesStorage:
         for directory in directories:
             filepath = self.make_path(directory, filename)
             self.cur.execute('INSERT OR REPLACE INTO new_files VALUES (?);', (filepath,))
-        
+    
+    def add_all_time_downloaded(self, directories, filename):
+        for directory in directories:
+            filepath = self.make_path(directory, filename)
+            self.cur.execute('INSERT OR REPLACE INTO downloaded VALUES (?);', (filepath,))
     
     def commit(self):
         self.cur.execute("COMMIT;")
@@ -562,9 +566,22 @@ def make_cache_folder():
     except FileExistsError:
         pass
     
-IMAGE_MATCH =  re.compile(r".*?(\d+?)\.(?:jpg|png|gif|swf|webm)")
+IMAGE_MATCH =  re.compile(r".*?(\d+?)\.(?:jpg|png|gif|swf|webm)$")
     
-def get_files_dict(reset_filedb):
+def get_all_time_downloaded():
+    conn = sqlite3.connect('files.db', isolation_level=None)
+    cur = conn.cursor()
+    
+    cur.execute('''
+        SELECT fullpath FROM downloaded;''')
+        
+    # deleting them
+    result = set()
+    for (fullpath, ) in cur:
+        result.add(fullpath)
+    return result
+    
+def get_files_dict(reset_filedb, reset_all_time_downloaded):
     #args = [arg.strip().lower() for arg in sys.argv]
     filedict={}
 
@@ -581,25 +598,51 @@ def get_files_dict(reset_filedb):
     conn = sqlite3.connect('files.db', isolation_level=None)
     cur = conn.cursor()
 
+    cur.executescript(
+        '''
+        BEGIN TRANSACTION;
+        
+        CREATE TABLE IF NOT EXISTS old_files (
+            fullpath    TEXT PRIMARY KEY
+                           UNIQUE
+                           NOT NULL
+        ) WITHOUT ROWID;
+        
+        CREATE TABLE IF NOT EXISTS new_files (
+            fullpath    TEXT PRIMARY KEY
+                           UNIQUE
+                           NOT NULL
+        ) WITHOUT ROWID;
+        
+        CREATE TABLE IF NOT EXISTS downloaded (
+            fullpath    TEXT PRIMARY KEY
+                           UNIQUE
+                           NOT NULL
+        );
+        
+        COMMIT;
+        '''
+    )
+
+
     if reset_filedb:
         cur.executescript(
             '''
             BEGIN TRANSACTION;
-            DROP TABLE IF EXISTS old_files;
             
-            CREATE TABLE old_files (
-                fullpath    TEXT PRIMARY KEY
-                               UNIQUE
-                               NOT NULL
-            ) WITHOUT ROWID;
+            DELETE FROM old_files;
+            DELETE FROM new_files;
             
-            DROP TABLE IF EXISTS new_files;
-            
-            CREATE TABLE new_files (
-                fullpath    TEXT PRIMARY KEY
-                               UNIQUE
-                               NOT NULL
-            ) WITHOUT ROWID;
+            COMMIT;
+            '''
+        )
+    
+    if reset_all_time_downloaded:
+        cur.executescript(
+            '''
+            BEGIN TRANSACTION;
+
+            DELETE FROM downloaded;
             
             COMMIT;
             '''
@@ -621,6 +664,22 @@ def get_files_dict(reset_filedb):
     conn.commit()
     
     return filedict
+
+
+def append_files(filedict, pathes):
+    conn = sqlite3.connect('files.db', isolation_level=None)
+    cur = conn.cursor()
+    cur.execute("BEGIN TRANSACTION;")
+    for path in pathes:
+        file=os.path.basename(newpath)
+        match = IMAGE_MATCH.match(file)
+        if match:
+            id=int(match[1])
+            filepath=path.replace('\\','/').lower()
+            filedict[id]=filepath
+            cur.execute('INSERT INTO old_files VALUES (?);', (filepath,))
+    cur.execute("COMMIT;")
+    conn.commit()
 
 def prune_cache():
     conn = sqlite3.connect('files.db', isolation_level=None)
@@ -651,6 +710,7 @@ def prune_cache():
         '''
     )
     
+    # making a list of all files that are in "downloads/"
     conn.commit()
     cur.execute("BEGIN TRANSACTION;")
     for root, dirs, files in os.walk('downloads/'):
@@ -662,6 +722,7 @@ def prune_cache():
     cur.execute("COMMIT;")
     conn.commit()
     
+    # making a list of all files that are in "cache/"
     cur.execute("BEGIN TRANSACTION;")
     for root, dirs, files in os.walk('cache/'):
         for file in files:
@@ -675,11 +736,14 @@ def prune_cache():
     cur.execute("COMMIT;")
     conn.commit()
     
+    # finding files that are in cache but not in downloads
     cur.execute('''
         SELECT fullpath FROM cached_files
         LEFT JOIN used_ids
         ON used_ids.id = cached_files.id
         WHERE used_ids.id IS NULL;''')
+        
+    # deleting them
     for (filename, ) in cur:
         with suppress(FileNotFoundError):
             os.remove(filename)
@@ -695,8 +759,7 @@ def validate_format(format):
 def get_blocked_posts():
     os.makedirs("to_blocked_posts", exist_ok=True)
     
-    #Создаём файл, если он был случайно удалён,
-    #Или просто ничего не делаем
+    #Creating file if it was accidentally removed
     with open("blocked_posts.txt" , "a"):
         pass
     
