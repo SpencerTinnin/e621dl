@@ -94,17 +94,17 @@ First, we need to install and configure two addons:
 
 Follow this for the first:
 
-![01_install_switcher](pics\chromepix\01_install_switcher.png)
+![01_install_switcher](pics/chromepix/01_install_switcher.png)
 
 
 
-![02_confirm_switcher](pics\chromepix\02_confirm_switcher.png)
+![02_confirm_switcher](pics/chromepix/02_confirm_switcher.png)
 
-![03_manage_switcher](pics\chromepix\03_manage_switcher.png)
+![03_manage_switcher](pics/chromepix/03_manage_switcher.png)
 
 
 
-![04_allow_incognito_switcher](pics\chromepix\04_allow_incognito_switcher.png)
+![04_allow_incognito_switcher](pics/chromepix/04_allow_incognito_switcher.png)
 
 
 
@@ -114,41 +114,41 @@ And this for the second:
 
 
 
-![05_install_cookie](pics\chromepix\05_install_cookie.png)
+![05_install_cookie](pics/chromepix/05_install_cookie.png)
 
 
 
-![06_confirm_cookie](pics\chromepix\06_confirm_cookie.png)
+![06_confirm_cookie](pics/chromepix/06_confirm_cookie.png)
 
 
 
-![07_manage_cookie](pics\chromepix\07_manage_cookie.png)
+![07_manage_cookie](pics/chromepix/07_manage_cookie.png)
 
 
 
-![08_allow_incognito_cookie](pics\chromepix\08_allow_incognito_cookie.png)
+![08_allow_incognito_cookie](pics/chromepix/08_allow_incognito_cookie.png)
 
 
 
 Now, open an incognito window:
 
-![09_new_incognito_window](pics\chromepix\09_new_incognito_window.png)
+![09_new_incognito_window](pics/chromepix/09_new_incognito_window.png)
 
 
 
 and change its User Agent:
 
-![10_e621dl_useragent](pics\chromepix\10_e621dl_useragent.png)
+![10_e621dl_useragent](pics/chromepix/10_e621dl_useragent.png)
 
 
 
 then solve a captcha on https://www.e621.net :
 
-![11_solve_captcha](pics\chromepix\11_solve_captcha.png)
+![11_solve_captcha](pics/chromepix/11_solve_captcha.png)
 
 And copy all cookies there to the clipboard:
 
-![12_copy_cookie](pics\chromepix\12_copy_cookie.png)
+![12_copy_cookie](pics/chromepix/12_copy_cookie.png)
 
 Finally, open `cfcookie.txt` in a folder with `e621dl.py`/`e621dl.exe`:
 
@@ -162,4 +162,4 @@ If you are paranoid, just leave sections with `__cfduid` and `cf_clearance`.
 
 Don't forget to revert your User Agent:
 
-![15_reset_user_agent](F:\temp\4\pics\chromepix\15_reset_user_agent.png)
+![15_reset_user_agent](pics/chromepix/15_reset_user_agent.png)
