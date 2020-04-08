@@ -8,9 +8,9 @@ Then yes you need.
 
 To bypass it, you need Firefox or Chrome or any browser that supports their plugins.
 
-[Instruction for Firefox](#Instruction for Firefox)
+[Instruction for Firefox](#instruction-for-firefox)
 
-[Instruction for Chrome](#Instruction for Chrome)
+[Instruction for Chrome](#instruction-for-chrome)
 
 ## Instruction for Firefox
 
