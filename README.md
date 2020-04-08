@@ -17,7 +17,6 @@ Main features of this fork:
 - Search requests and file downloads work _in parallel_, so you do not need to wait file downloads to get new portion of tags to filter.
 - **Duplicates** are not downloaded again, they either copied or **hardlinked** from existing files. Think of _hardlink_ as of _another name and path for the same file_. That means hardlinks cannot be used across different disks, and if you change content in one hardlink, it will stay changed in another. But they take about zero space. Since on Windows you have to be admin or enable Developer Mode (Win10 only), this **option is disabled by default**. To enable it, add `make_hardlinks = true` to `[Settings]` and be sure either Developer Mode is enabled or that the app runs with admin privilege.
 - If you need to stop e621dl, or there was some random error, it will continue search and download right were it stopped. On Windows, you can just close console window. Same for Linux consoles. More specifically for `SIGHUP`,`SIGINT` and `SIGTERM` signals.
-- You can use `~`, `-` and `*` wildcards for every tags, not only first five. Be aware, only firs five can reduce number of requests to e621 API.
 - You can use **advanced boolean conditions** for further filtering.
 - You can cache all files downloaded before to cache folder. This is **not** default behavior.
 - You can store all posts info from API to local database. This is also **not** default behavior.
@@ -31,38 +30,45 @@ Main features of this fork:
 - **Folder pruning**. All files that are no longer required can be removed on next run. This is **not** a default behavior.
 - Easy post blacklisting. Just move files you don't wanna see again to a special folder, and you won't. The files will also be removed from the folder.
 - **Authorization via e621 API key**.
+- Option to not redownload deleted files
 
-# Installing and Setting Up **e621dl**
+# Installing and Running **e621dl**
+## from a Windows executable
 
 - Download [the latest executable release of **e621dl**](https://github.com/lurkbbs/e621dl/releases).
-
-*or*
-
-- Download and install [the latest release of Python 3](https://www.python.org/downloads/release/python-3).
-    - Make sure you check ":ballot_box_with_check: Add to PATH" on Windows during installation.
-- Open admin command line and type `pip install requests colorama`
-- Download [the latest *source* release of **e621dl**](https://github.com/lurkbbs/e621dl/releases).
-    - Decompress the archive into any directory you would like.
-
-# Running **e621dl**
-## Running **e621dl** from the Windows executable.
-
 - Double click the e621dl.exe icon to run the program. It will close immediately on completion.
-    - If you would like to read the output after the execution is complete, run the program through the command prompt in the directory that you placed the .exe file. On windows, you can Shift+Click on empty space of a folder and select _PowerShell_ (or _Command line_, depending on your settings). 
+    - You can use e621_noclose.bat to hold console window after e621dl.exe finishes. That way, the window will be present even if e621dl.exe crashes 
 
-## Running **e621dl** from source.
+## from source
 
-You must install all of this program's python dependencies for it to run properly from source. They can be installed by running the following command in your command shell: `pip install [package name]`.
-*You must run your command shell with admin/sudo permissions for the installation of new packages to be successful.*
+If you want to run from source on Windows and have zero understanding of how to install it all, follow this instruction:
 
-The required packages for **e621dl** are currently:
-- [requests](https://python-requests.org)
-- [colorama](https://github.com/tartley/colorama)
-- [natsort](https://github.com/SethMMorton/natsort)
+1. Open PowerShell as an Admin. On Win10, you can right-click on Start Button, then select PowerShell (Admin)
+2. Paste this and press Enter:
 
-Open your command shell in the directory you decompressed e621dl into, and run the command `py e621dl.py`. Depending on your system, the command `py` may default to Python 2. In this case you should run `py -3 e621dl.py`. Sometimes, your system may not recognize the `py` command at all. In this case you should run `python3 e621dl.py`. In some cases where Python 3 was the first installed version of Python, the command `python e621dl.py` will be used. On Windows, if you associated python with *.py files during python installation, you can just double click on e621.py or in commandline enter `e621dl.py`.
+```
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://chocolatey.org/install.ps1'))
+```
 
-The most common error that occurs when running a Python 3 program in Python 2 is `SyntaxError: Missing parentheses in call to 'print'`.
+And confirm everything if needed. This installs chocolatey.
+
+3. Paste this and press Enter in the same or a new console:
+
+```
+choco install python
+```
+
+And also confirm everything. Obviously, this installs python. If it  doesn't work, close PowerShell then open it and paste-enter again.
+
+4. Paste this and press Enter in the same or a new console:
+
+```
+pip install requests colorama natsort brotli
+```
+
+This installs all required dependencies
+
+5. [Download source](https://github.com/Wulfre/e621dl/archive/master.zip) and unpack it to a folder, then doubleclick `e621_noclose_py.bat`
 
 ## For Windows 10 users
 
@@ -114,7 +120,7 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;days = 1
 ;min_score = -2147483647
 ;min_favs = 0
-;ratings = s
+;ratings = s q e
 ;max_downloads = inf
 ;post_from = api ;db is for saved database
 ;format = 
@@ -651,11 +657,12 @@ Settings for e621dl. All settings are boolean values that accept `true` or `fals
 | make_hardlinks  | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
 | make_cache      | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
 | db              | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
-| offline         | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. |
-| prune_downloads | If `true` in at least one of config files, all files in `downloads` that do not meet any of search criteria will be removed after all configs are processed. It's as if you removed everything and then download only what you need. |
-| prune_cache     | If you have a cache folder and if `true` in at least one of config files , than any files that has not a single copy/hardlink in `downloads ` will be deleted after all configs are processed. It's as if we manually removed all files in the cache and then copied it from downloads. |
+| offline         | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. This option must be enabled in all configs to work properly. |
+| prune_downloads | If `true` in at least one of config files, all files in `downloads` that do not meet any of search criteria will be removed after all configs are processed. It's as if you removed everything and then download only what you need. This option will be true for every configs if set to true in at leas one of them. |
+| prune_cache     | If you have a cache folder and if `true` in at least one of config files , than any files that has not a single copy/hardlink in `downloads ` will be deleted after all configs are processed. It's as if we manually removed all files in the cache and then copied it from downloads. This option will be true for every configs if set to true in at leas one of them. |
 | login           | Your e621 login                                              |
 | api_key         | Your API key, generated in "Account" > "Manage API Access"   |
+| no_redownload   | Blocks e621dl from redownloading files from a folder if they were deleted from there. This option will be true for every configs if set to true in at leas one of them. |
 
 
 

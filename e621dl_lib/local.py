@@ -15,6 +15,7 @@ from shutil import get_terminal_size, move
 from contextlib import contextmanager, suppress
 import glob
 import re
+import json
 
 # External Imports
 import colorama
@@ -793,3 +794,35 @@ def remove_empty_folders():
             os.rmdir(root)
         except (OSError, FileNotFoundError):
             pass
+
+def get_cookies():
+    if not os.path.exists("cfcookie.txt"):
+        return None
+    
+    with open("cfcookie.txt", "r") as f:
+        try:
+            cookie_dict = json.load(f)
+        except json.decoder.JSONDecodeError:
+            return None
+            
+    
+    __cfduid = None
+    cf_clearance = None
+    for cookie in cookie_dict:
+        if 'name' in cookie and cookie['name'] == "__cfduid":
+            __cfduid = cookie['value'] 
+        
+        if 'Name raw' in cookie and cookie['Name raw'] == "__cfduid":
+            __cfduid = cookie['Content raw'] 
+        
+        
+        if 'name' in cookie and cookie['name'] == "cf_clearance":
+            cf_clearance = cookie['value']
+            
+        if 'Name raw' in cookie and cookie['Name raw'] == "cf_clearance":
+            cf_clearance = cookie['Content raw']
+            
+    if __cfduid is None or cf_clearance is None:
+        return None
+    
+    return f"__cfduid={__cfduid}; cf_clearance={cf_clearance};"

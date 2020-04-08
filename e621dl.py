@@ -82,7 +82,7 @@ def get_directories(post, root_dirs, search, searches_dict):
     
     # We travel below only if current folder matches
     # our criteria or there is nothing to look for
-    if search_result or not search['has_actаual_search']:
+    if search_result or not search['has_actual_search']:
         for directory in subdirectories:
             #preventing recursions in cases like cat/dog/cat/dog/...
             if directory in root_dirs:
@@ -213,11 +213,14 @@ def global_config_options(configs):
                         current_full_offline = True
             full_offlines.append(current_full_offline)
     
-    full_offline = min(full_offlines)
+    if not full_offlines:
+        full_offline = False
+    else:
+        full_offline = min(full_offlines)
     return prune_downloads, prune_cache, no_redownload, full_offline
         
 def main():
-    #local.printer.show(False)
+    # local.printer.show(False)
     local.printer.start()
     local.save_on_exit_events(download_queue.save)
     current_configs = local.get_configs()
@@ -234,12 +237,14 @@ def main():
     config_queue.reset_filedb = False
     config_queue.save()
     
+    cookies = local.get_cookies()
+    
     with remote.requests_retry_session() as session:
 
         for config in config_queue.get_remaining():
             config_name = '/'.join(config.replace('\\','/').split('/')[1:])
             local.printer.change_config(config_name)
-            process_config(config, session, pathes_storage, files, all_time_downloaded)
+            process_config(config, session, pathes_storage, files, all_time_downloaded, cookies)
             
             config_queue.add(config)
             config_queue.save()
@@ -264,14 +269,16 @@ def main():
     
 
 #@profile
-def process_config(filename, session, pathes_storage, files, all_time_downloaded):
+def process_config(filename, session, pathes_storage, files, all_time_downloaded, cookies):
     # Create the requests session that will be used throughout the run.
     
-    
-    
-    
+
+    session.headers['accept-encoding'] = "gzip, deflate, br"
+
+    if cookies:
+        session.headers['cookie'] = cookies
     # Set the user-agent. Requirements are specified at https://e621.net/help/show/api#basics.
-    session.headers['User-Agent'] = f"e621dl (lurkbbs) -- Version {constants.VERSION}"
+    session.headers['user-agent'] = f"e621dl (lurkbbs) -- Version {constants.VERSION}"
     
     local.printer.change_status("Parsing config")
 
@@ -290,7 +297,7 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
     default_date = local.get_date(default_days_ago) # Get posts from one day before execution.
     default_score = -0x7F_FF_FF_FF # Allow posts of any score to be downloaded.
     default_favs = 0
-    default_ratings = ['s'] # Allow only safe posts to be downloaded.
+    default_ratings = ['s','q','e'] # Allow only safe posts to be downloaded.
     default_posts_limit = float('inf')
     default_format = ''
     default_subdirectories = set()

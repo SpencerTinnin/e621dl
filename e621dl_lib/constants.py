@@ -1,4 +1,4 @@
-VERSION = '5.9.1'
+VERSION = '5.10.0'
 
 MAX_RESULTS = 320
 PARTIAL_DOWNLOAD_EXT = 'request'
@@ -42,7 +42,7 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;days = 1
 ;min_score = -2147483647
 ;min_favs = 0
-;ratings = s
+;ratings = s q e
 ;max_downloads = inf
 ;post_from = api ;db is for saved database
 ;format = 

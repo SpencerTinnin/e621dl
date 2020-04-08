@@ -1,5 +1,6 @@
 # Internal Imports
 import os
+import sys
 from time import sleep, time
 from datetime import datetime
 from functools import lru_cache
@@ -132,71 +133,36 @@ def solve_captcha(session, response):
     splitted=urlparse(url)
     baseurl=f"{splitted.scheme}://{splitted.netloc}"
     
-    # Zalgo. He comes.
-    # To be fair, you can use regexps to search in
-    # an html with a known structure.
-    hidden_input_re = re.compile('<input type="hidden" name="(.*?)" value="(.*?)"')
-    textarea_re = re.compile('<textarea .*? name="(.*?)"')
-    form_re = re.compile('<form .*? action="(.*?)" method="(.*?)"')
-    iframe_re = re.compile('<iframe src="(.*?)"')
-    
-    try:
-        hidden_name, hidden_value = hidden_input_re.search(text).groups()
-    except:
-        printer.change_warning("unexpected absense of hidden input")
-        return False
-    
-    try:
-        textarea_name, = textarea_re.search(text).groups()
-    except:
-        printer.change_warning("unexpected absense of textarea")
-        return False
-        
-    try:
-        form_url, form_method = form_re.search(text).groups()
-    except:
-        printer.change_warning("unexpected absense of form")
-        return False
-    
-    try:
-        iframe_url, = iframe_re.search(text).groups()
-    except:
-        printer.change_warning("unexpected absense of iframe")
-        return False
-    
-    form_method = form_method.lower()
-    
     printer.show(False)
-    sleep(0.2)
+    printer.stop()
+    printer.join()
     printer.reset_screen()
-    print("Install Referer Control extension in your browser, then")
-    print("set up (temporarily) referer for 'https://www.google.com/recaptcha/*'")
-    print("to 'https://e621.net', then")
-    print("open this link in the browser:")
-    print(iframe_url)
-    print("after successful recaptcha solving")
-    print("copy text field content here:")
-    textarea_value=input()
+    print(text)
+    print(url)
+    print(splitted)
+    sys.exit(0)
     
-    printer.show()
+def ask_cookies():
+    printer.show(False)
+    printer.stop()
+    printer.join()
+    printer.reset_screen()
+   
+    with open('cfcookie.txt', 'w+'):
+        pass
     
-    if form_url[0] == "/":
-        form_url = baseurl+form_url
+    print("A wild Cloudflare appeared!")
+    print("To win it, in your browser, change user agent to this:")
+    print()
+    print(f"e621dl (lurkbbs) -- Version {constants.VERSION}")
+    print()
+    print("Then copy cookie using EditThisCookie in Chrome")
+    print("or Cookies Quick Manager in Firefox")
+    print("to cfcookie.txt in json format")
+    print("See details here:")
+    print("https://github.com/lurkbbs/e621dl/blob/master/Cloudflare.md")
+    sys.exit(0)
     
-    payload={
-                hidden_name:hidden_value,
-                textarea_name:textarea_value,
-            }
-    
-    if form_method == "get":
-        response = retrying_get(session, form_url, params=payload, timeout=TIMEOUT)
-    elif form_method == "post":
-        response = retrying_post(session, form_url, data=payload, timeout=TIMEOUT)
-    else:
-        printer.change_warning("unknown method")
-    
-    return not check_cloudflare(response) #means we solve a captcha
-
 def delayed_post(url, payload, session):
     # Take time before and after getting the requests response.
     start = time()
@@ -213,8 +179,8 @@ def delayed_post(url, payload, session):
         sleep(1.0 - elapsed)
 
     if check_cloudflare(response):
-        solve_captcha(session, response)
-        return delayed_post(url, payload, session)
+        ask_cookies()
+        return None
     
     return response
 
@@ -235,8 +201,8 @@ def delayed_get(url, payload, session):
         sleep(1.0 - elapsed)
 
     if check_cloudflare(response):
-        solve_captcha(session, response)
-        return delayed_get(url, payload, session)
+        ask_cookies()
+        return None
     
     return response
 
