@@ -19,7 +19,7 @@ from .local import printer
 import requests
 from requests.adapters import HTTPAdapter
 from requests.packages.urllib3.util.retry import Retry
-from requests.exceptions import ConnectionError, ReadTimeout, HTTPError
+from requests.exceptions import ConnectionError, ReadTimeout, HTTPError, MissingSchema
 
 TIMEOUT = constants.CONNECTION_TIMEOUT
 
@@ -289,7 +289,7 @@ def get_known_post(post_id, api_key, login, session):
 
     return response.json()["post"]
 
-@lru_cache(maxsize=512, typed=False)
+@lru_cache(maxsize=None, typed=False)
 def get_tag_alias(user_tag, api_key, login, session):
     prefix = ''
     
@@ -381,7 +381,8 @@ def download_post(url, path, session, cachefunc, duplicate_func, api_key, login)
 
     # Creates file if it does not exist so that os.path.getsize does not raise an exception.
     try:
-        open(path, 'x')
+        with open(path, 'a'):
+            pass
     except FileExistsError:
         pass
 
@@ -446,11 +447,15 @@ def finish_partial_downloads(session, cachefunc, duplicate_func, filedict, api_k
 
                 try:
                     url = get_known_post(id, api_key, login, session)['file']['url']
-                except HTTPError:
+                except (HTTPError, ValueError, MissingSchema):
                     os.remove(path)
                     continue
-
-                if download_post(url, path, session, cachefunc, duplicate_func, api_key, login):
-                    downloaded_files.append(newpath)
+                
+                try:
+                    if download_post(url, path, session, cachefunc, duplicate_func, api_key, login):
+                        downloaded_files.append(newpath)
+                except (HTTPError, ValueError, MissingSchema):
+                    os.remove(path)
+                    continue
                     
     return downloaded_files

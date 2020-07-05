@@ -1,6 +1,33 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+# Test if all external libraries are present:
+
+
+LINE_OF_INSTALL =(
+"""You don't have all required libraries
+To install them, open command line or PowerShell, type:
+
+pip install requests colorama natsort brotli atomicwrites
+
+And press Enter"""
+)
+
+try:
+    import atomicwrites as test_jfguhg_atomicwrites
+    import requests as test_jfguhg_requests
+    import colorama as test_jfguhg_colorama
+    import natsort as test_jfguhg_natsort
+    import brotli as test_jfguhg_brotli
+except:
+    print(LINE_OF_INSTALL)
+    import sys
+    sys.exit(0)
+    
+del LINE_OF_INSTALL
+
+
+
 # Internal Imports
 import os
 import re
@@ -69,6 +96,28 @@ def process_results(results, **dummy):
         
     return filtered_results
 
+def get_pools(post):
+    try:
+        pools = post.pools
+    except:
+        return []
+        
+    return post.pools
+
+def process_pools(post, **dummy):
+    try:
+        pools = post.pools
+    except:
+        return
+
+    for pool in pools:
+        post.tags.append(f"pool:{pool}")
+    
+def process_results_pools(results, **dummy):
+    for post in results:
+        process_pools(post, **dummy)
+        
+
 #TODO: describe how this all works. God this is not intuitive
 def get_directories(post, root_dirs, search, searches_dict):
     subdirectories = search['subdirectories']
@@ -103,12 +152,9 @@ def get_directories(post, root_dirs, search, searches_dict):
 
 def get_files(post, filename, directories, files, session, cachefunc, duplicate_func, download_post, search, api_key, login):
     with download_set.context_id(post.id):
-
-        
         for directory in directories:
             file_id=post.id
             path = local.make_path(directory, filename)
-
             if os.path.isfile(path):
                 local.printer.increment_old()
             elif file_id in files:
@@ -129,17 +175,20 @@ def prefilter_build_index(kwargses, use_db, searches):
     
     if use_db:
         storage.connect()
+        max_queue_len=1
+    else:
+        max_queue_len=10
+    
     
     blocked_ids = local.get_blocked_posts()
     
     try:
         if download_queue.completed:
             return
-        
-        last_id = download_queue.last_id
-        
-        for kwargs in kwargses:
 
+        for kwargs in kwargses:
+            last_id = download_queue.last_id
+            
             directory = kwargs['directory']
             local.printer.change_section(directory)
             gen = kwargs['gen_funcs']
@@ -150,10 +199,11 @@ def prefilter_build_index(kwargses, use_db, searches):
                 local.printer.increment_posts(len(results))
                 append_func(results)
                 filtered_results=[post for post in results if post.id not in blocked_ids]
+                process_results_pools(filtered_results)  # adding tag pool:<pool id> for every pools for a post
                 filtered_results=process_results(filtered_results, **kwargs)
                 local.printer.increment_filtered(len(set(results) - set(filtered_results)))
                 
-                download_queue.append( (directory, filtered_results) )
+                download_queue.append( (directory, filtered_results), max_queue_len )
                 post=results[-1]
                 download_queue.last_id=post.id
                 if post.days_ago >= max_days_ago:
@@ -193,6 +243,7 @@ def global_config_options(configs):
     prune_cache = False
     no_redownload = False
     full_offlines = []
+    need_to_check_pools_config = False
     for section in config.sections():
         # Get values from the "Settings" section. Currently only used for file name appending.
         
@@ -211,13 +262,16 @@ def global_config_options(configs):
                 if option.lower() in {'full_offline', 'offline'}:
                     if value.lower() == 'true':
                         current_full_offline = True
+                if option.lower() in {'pool_download_generate'}:
+                    if value.lower() == 'true':
+                        need_to_check_pools_config = True
             full_offlines.append(current_full_offline)
     
     if not full_offlines:
         full_offline = False
     else:
         full_offline = min(full_offlines)
-    return prune_downloads, prune_cache, no_redownload, full_offline
+    return prune_downloads, prune_cache, no_redownload, full_offline, need_to_check_pools_config
         
 def main():
     # local.printer.show(False)
@@ -225,10 +279,18 @@ def main():
     local.save_on_exit_events(download_queue.save)
     current_configs = local.get_configs()
     
-    prune_downloads, prune_cache, no_redownload, dummy_full_offline =  global_config_options(current_configs)
+    prune_downloads, prune_cache, no_redownload, dummy_full_offline, need_to_check_pools_config = global_config_options(current_configs)
+    
+    if need_to_check_pools_config:
+        local.make_pools_config()
     
     config_queue.change_if_not_same(current_configs)
     config_queue.reset_if_complete()
+    
+    if config_queue.reset_filedb:
+        local.reset_pools()
+    
+    pools = local.load_pools()
     
     local.printer.change_status("Building downloaded files dict")
     files = local.get_files_dict(config_queue.reset_filedb, not no_redownload)
@@ -242,13 +304,17 @@ def main():
     with remote.requests_retry_session() as session:
 
         for config in config_queue.get_remaining():
-            config_name = '/'.join(config.replace('\\','/').split('/')[1:])
-            local.printer.change_config(config_name)
-            process_config(config, session, pathes_storage, files, all_time_downloaded, cookies)
+            process_config(config, session, pathes_storage, files, all_time_downloaded, cookies, pools)
             
             config_queue.add(config)
             config_queue.save()
     
+
+    if pools:
+        local.generate_pools_config(pools)
+        
+        config = 'configs/pools.generated'
+        process_config(config, session, pathes_storage, files, all_time_downloaded, cookies, pools)
 
     if prune_downloads:
         local.printer.change_status("Pruning downloads")
@@ -268,10 +334,12 @@ def main():
     
     
 
-#@profile
-def process_config(filename, session, pathes_storage, files, all_time_downloaded, cookies):
+# TODO: separate config to a class and convert 
+def process_config(filename, session, pathes_storage, files, all_time_downloaded, cookies, pools_folders):
     # Create the requests session that will be used throughout the run.
-    
+
+    config_name = '/'.join(filename.replace('\\','/').split('/')[1:])
+    local.printer.change_config(config_name)    
 
     session.headers['accept-encoding'] = "gzip, deflate, br"
 
@@ -301,6 +369,9 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
     default_posts_limit = float('inf')
     default_format = ''
     default_subdirectories = set()
+    default_move_pooled = False
+    default_make_pooled_subfolder = False
+    
     
     duplicate_func = copy
     cachefunc = None
@@ -320,6 +391,9 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
     prune_cache = False
     api_key = None
     login = None
+    
+    pool_download_generate = False
+    
     # Iterate through all sections (lines enclosed in brackets: []).
     for section in config.sections():
 
@@ -349,9 +423,12 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                     if value.lower() == 'true':
                         prune_cache = True                
                 elif option.lower() in {'password', 'api_key', 'key'}:
-                        api_key = value.strip()
+                    api_key = value.strip()
                 elif option.lower() in {'login', 'username', 'name'}:
-                        login = value.strip().lower()
+                    login = value.strip().lower()
+                elif option.lower() in {'pool_download_generate'}:
+                    if value.lower() == 'true':
+                        pool_download_generate = True
                 
         if section.lower() == 'settings':
             for option, value in config.items(section):
@@ -397,6 +474,14 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                         use_db = True
                 elif option.lower() in {'subfolder', 'subfolders', 'subdir', 'subdirs', 'subdirectory', 'subdirectories'}:
                     default_subdirectories.update( value.replace(',', ' ').lower().strip().split() )
+                elif option.lower() in {'pool_post_strategy'}:
+                    default_make_pooled_subfolder = True
+                    if value.lower() == 'move':
+                        default_move_pooled = True
+                    elif value.lower() == 'copy':
+                        default_move_pooled = False
+                    else:
+                        printer.change_warning(f"incorrect pool_post_strategy: {value.lower()}, fallback to default: { 'move' if default_move_pooled else 'copy'}")
                 
         # Get values from the "Blacklist" section. Tags are aliased to their acknowledged names.
         elif section.lower() == 'blacklist':
@@ -472,7 +557,9 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
             section_post_limit = default_posts_limit
             section_format = default_format
             section_subdirectories = set() #default_subdirectories.copy()
-            use_default_subfolders = True
+            section_use_default_subfolders = True
+            section_move_pooled = default_move_pooled
+            section_make_pooled_subfolder = default_make_pooled_subfolder
             # Go through each option within the section to find search related values.
             for option, value in config.items(section):
 
@@ -497,7 +584,7 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                 elif option.lower() in {'min_favs', 'favs'}:
                     section_favs = int(value)
                 elif option.lower() in {'blacklist_default_subfolders', 'no_default_subfolders'}:
-                    use_default_subfolders = not (value.lower() == "true")
+                    section_use_default_subfolders = not (value.lower() == "true")
                 elif option.lower() in {'ratings', 'rating'}:
                     section_ratings = value.replace(',', ' ').lower().strip().split()
                 elif option.lower() in {'limit', 'max_downloads', 'posts_limit', 'files_limit'}:
@@ -521,6 +608,14 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                         section_gen_func=remote.get_posts
                         if allow_append:
                             section_append_func = storage.append
+                elif option.lower() in {'pool_post_strategy'}:
+                    section_make_pooled_subfolder = True
+                    if value.lower() == 'move':
+                        section_move_pooled = True
+                    elif value.lower() == 'copy':
+                        section_move_pooled = False
+                    else:
+                        printer.change_warning(f"incorrect pool_post_strategy: {value.lower()}, fallback to default: { 'move' if section_move_pooled else 'copy'}")
             
             section_tags += ['-'+tag for tag in blacklist+section_blacklisted]
             #section_search_tags = [tag for tag in section_tags if '*' not in tag][:38]
@@ -531,7 +626,7 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
             
             section_has_actual_search = \
                 check_has_actual_search(section_whitelist, section_blacklist, section_anylist, section_cond_func)
-            if section_has_actual_search and use_default_subfolders:
+            if section_has_actual_search and section_use_default_subfolders:
                 section_subdirectories.update(default_subdirectories)
             # Append the final values that will be used for the specific section to the list of searches.
             # Note section_tags is a list within a list.
@@ -562,7 +657,9 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                              'session'  : session,
                              'has_actual_search': section_has_actual_search,
                              'login': login,
-                             'api_key': api_key,}
+                             'api_key': api_key,
+                             'make_pooled_subfolder': section_make_pooled_subfolder,
+                             'move_pooled': section_move_pooled,}
             
             if is_prefilter(section_id):
                 prefilter.append(section_dict)
@@ -592,7 +689,6 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
     queue_thread.start()
     
     download_pool=ThreadPoolExecutor(max_workers=2)
-    
     try:
         while True:
             try:
@@ -621,18 +717,49 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                 for search, post in results_pair:
                     directory = search['directory']
                     format = search['format']
+                    make_pooled_subfolder = search['make_pooled_subfolder']
+                    move_pooled = search['move_pooled']
                     if search['posts_countdown'] <= 0:
                         remaining_from_countdown.append( (search, post) )
                         continue
 
                     if format:
                         id_ext = f'{post.id}.{post.file_ext}'
-                        custom_prefix = format.format(**post.generate())[:100]
+                        
+                        # TODO: make all pathes absolute at least at the place they are actually used
+                        custom_prefix = format.format(**post.generate())[:100]  
                         filename = f'{custom_prefix}.{id_ext}'
                     else:
                         filename = f'{post.id}.{post.file_ext}'
                     
-                    unfiltered_directories = get_directories(post, [directory], search, searches_dict)
+                    poolless_unfiltered_directories = get_directories(post, [directory], search, searches_dict)
+                    
+                    # Here be pools
+                    # First, check if post has pools.
+                    # Second, if it is, for every directory add copy to <dir>/pools/<name_of_pool>
+                    
+                    
+                    pooled_unfiltered_directories=[]
+                    if make_pooled_subfolder and poolless_unfiltered_directories:
+                        pools = get_pools(post)
+                        for pool in pools:
+                            for dir in poolless_unfiltered_directories:
+                                pooled_unfiltered_directories.append(f"{dir}/pools/{pool}")
+
+                            if pool_download_generate:
+                                pools_folders.setdefault(pool,[]).extend(pooled_unfiltered_directories)
+                            
+                    if make_pooled_subfolder and pooled_unfiltered_directories:
+                        if move_pooled:
+                            unfiltered_directories = pooled_unfiltered_directories
+                        else:
+                            unfiltered_directories = pooled_unfiltered_directories + poolless_unfiltered_directories
+                    else:
+                        unfiltered_directories = poolless_unfiltered_directories
+                    # Third, if there is a flag, add said directory to list pairs of pairs pool-directory and list of all pools, and save it.
+                    # Forth, if there is a flag, remove original path and replace for pooled
+                    # Fifth, if there is a flag, at the end of all non-generated configs, (re)generate config for pools and execute it
+                    
                     directories = []
                     for unfiltered_directory in unfiltered_directories:
                         if pathes_storage.make_path(unfiltered_directory, filename) not in all_time_downloaded:
@@ -666,9 +793,12 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                 results_pair = []
                 for search, post in remaining_from_countdown:
                     if search['posts_countdown'] > 0:
-                        results_pair.append(search, post)
+                        results_pair.append((search, post))
                     
             download_queue.popleft()
+            local.save_pools(pools_folders)
+            download_queue.save()
+            
 
     except: #Pull request a better way
         local.printer.show(False)

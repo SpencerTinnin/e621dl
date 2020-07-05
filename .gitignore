@@ -61,3 +61,11 @@ build.bat
 config.ini*
 *.exe
 
+/cfcookie.txt
+/blocked_posts.txt
+
+configs
+/pools.ini
+/files.db
+/config_queue.pickle
+/pools.pickle

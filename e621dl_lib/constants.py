@@ -1,11 +1,12 @@
-VERSION = '5.10.0'
+VERSION = '5.11.0'
 
 MAX_RESULTS = 320
+MAX_RESULTS_OFFLINE = 32000
 PARTIAL_DOWNLOAD_EXT = 'request'
 
-#first number: time to establish connection
-#second number: max wait between bytes sent
-#aka (connect timeout, read timeout)
+# first number: time to establish connection
+# second number: max wait between bytes sent
+# aka (connect timeout, read timeout)
 CONNECTION_TIMEOUT = (6.1, 15.5)
 
 MAX_USER_SEARCH_TAGS = 38 #one for time tag, one for id tag
@@ -36,6 +37,8 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ;prune_cache = true
 ;login = your e621 login
 ;api_key = your e621 api key generated in account settings
+;no_redownload = true
+;pool_download_generate = true
 
 ;These are default settings for all search groups below
 ;[Defaults]
@@ -195,3 +198,22 @@ DEFAULT_CONFIG_TEXT = ''';;;;;;;;;;;;;;
 ; tags = cat
 ; subfolders = wide_eyed_subcat
 '''
+
+DEFAULT_POOLS_CONFIG="""
+
+;[Settings]
+;include_md5 = false
+;make_hardlinks = true
+;make_cache = true
+;prune_downloads = true
+;prune_cache = true
+;login = your e621 login
+;api_key = your e621 api key generated in account settings
+
+[Defaults]
+days = 365000
+min_score = -2147483647
+min_favs = 0
+ratings = s q e
+;format = 
+"""

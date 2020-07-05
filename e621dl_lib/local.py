@@ -20,6 +20,7 @@ import json
 # External Imports
 import colorama
 from natsort import natsorted
+from atomicwrites import atomic_write, replace_atomic
 
 # Personal Imports
 from . import constants
@@ -174,14 +175,14 @@ class DownloadQueue:
             with self._lock:
                 if len(self._deque) < maxlen:
                     break
-            sleep(0.0001)
+            sleep(0.02)
         
         with self._lock:
             return self._deque.append(arg)
     
     def save(self):
         with self._lock:
-            with open('download_queue.pickle', 'wb') as download_queue_file:
+            with atomic_write('download_queue.pickle', mode='wb', overwrite=True) as download_queue_file:
                 pickle.dump((
                              self.last_id,
                              self.completed,
@@ -246,7 +247,7 @@ class ConfigQueue:
 
     def save(self):
         with self._lock:
-            with open('config_queue.pickle', 'wb') as config_queue_file:
+            with atomic_write('config_queue.pickle', mode='wb', overwrite=True) as config_queue_file:
                 pickle.dump((
                              self.config_set,
                              self.completed_set,
@@ -312,7 +313,7 @@ class PostsStorage:
             ) WITHOUT ROWID;'''
         )
         self.conn.commit()
-        self.cur.arraysize=constants.MAX_RESULTS
+        self.cur.arraysize= constants.MAX_RESULTS_OFFLINE
         
     def gen(self, last_id, **dummy):
         self.cur.execute('SELECT struct FROM posts WHERE id<=? ORDER BY id DESC', (last_id,))
@@ -344,7 +345,7 @@ class PathesStorage:
     def commit(self):
         self.cur.execute("COMMIT;")
     
-    @lru_cache(maxsize=512, typed=False)
+    @lru_cache(maxsize=None, typed=False)
     def make_new_dir(self, dir_name):
         return ''.join([substitute_illegals(char) for char in dir_name]).lower().replace('\\','/')
 
@@ -493,6 +494,20 @@ def make_config():
     print("https://en.wikipedia.org/wiki/Natural_sort_order")
     sys.exit()
 
+def make_pools_config():
+    if os.path.exists('pools.ini'):
+        return
+    with open('pools.ini', 'wt', encoding = 'utf_8_sig') as outfile:
+        outfile.write(constants.DEFAULT_POOLS_CONFIG)
+    printer.stop()
+    printer.join()
+    printer.reset_screen()
+    print("[!] You selected to download pools in one of your configs")
+    print("But there is no pools.ini template")
+    print("The file was created in a root folder of e621dl")
+    print("Please edit it as you see fit and restart the app")
+    sys.exit()
+
 def filehash(filename):
     hash = hashlib.md5()
     with open(filename, "rb") as f:
@@ -542,7 +557,7 @@ def substitute_illegals(char):
 def substitute_illegals_filename(filename):
     illegals = {':'  : 'ː',
                 '*'  : '❋',
-                '\"' : 'ᐦ',
+                '"'  : 'ᐦ',
                 '?'  : 'ʔ', 
                 '<'  : 'ᐸ', 
                 '>'  : 'ᐳ', 
@@ -552,7 +567,7 @@ def substitute_illegals_filename(filename):
     
     return ''.join([char if char not in illegals else illegals[char] for char in filename])
 
-@lru_cache(maxsize=512, typed=False)
+@lru_cache(maxsize=None, typed=False)
 def make_new_dir(dir_name):
     clean_dir_name = ''.join([substitute_illegals(char) for char in dir_name]).lower().replace('\\','/')
     os.makedirs(f"downloads/{clean_dir_name}", exist_ok=True)
@@ -780,7 +795,7 @@ def get_blocked_posts():
         for id in sorted(blocked_ids):
             print(id, file=f)
             
-    os.replace("blocked_posts_new.txt", "blocked_posts.txt")
+    replace_atomic("blocked_posts_new.txt", "blocked_posts.txt")
     for root, dirs, files in os.walk('to_blocked_posts/'):
         for file in files:
             filepath='{}/{}'.format(root,file)
@@ -826,3 +841,52 @@ def get_cookies():
         return None
     
     return f"__cfduid={__cfduid}; cf_clearance={cf_clearance};"
+
+def reset_pools():
+    if os.path.exists("pools.pickle"):
+        os.remove("pools.pickle")
+        
+def load_pools():
+    if not os.path.exists("pools.pickle"):
+        return {}
+    with open('pools.pickle', 'rb') as f:
+        return pickle.load(f)
+        
+def save_pools(pools):
+    with atomic_write('pools.pickle', mode='wb', overwrite=True) as f:
+        pickle.dump(pools, f, protocol=pickle.HIGHEST_PROTOCOL)
+        
+# https://stackoverflow.com/a/312464/3921746
+def chunks(lst, n):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i:i + n]
+        
+def generate_pools_config(pools):
+    if not pools:
+        return
+
+    lines = []
+
+    for i, pool in enumerate(list(pools)):
+        lines.append(f"""
+[<prefilter_{i+1}>]
+tags = pool:{pool}
+""")
+
+    for pool, folders in pools.items():
+        folders = set(folders)
+        for folder in folders:
+            lines.append(f"""
+[{folder}]
+tags = pool:{pool}
+""")
+
+    with open('pools.ini', 'rt', encoding = 'utf_8_sig') as f:
+        prefix_config = f.read()
+
+    with open('configs/pools.generated', 'wt', encoding = 'utf_8_sig') as f:
+        f.write(prefix_config)
+        f.write('\n')
+        f.write("\n".join(lines))
+        

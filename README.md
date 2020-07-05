@@ -14,23 +14,25 @@ Put very simply, when **e621dl** starts, it determines the following based on co
 Once it knows these things, it goes through the searches one by one, and downloads _only_ content that matches your search request, and has passed through all specified filters.
 
 Main features of this fork:
+
 - Search requests and file downloads work _in parallel_, so you do not need to wait file downloads to get new portion of tags to filter.
-- **Duplicates** are not downloaded again, they either copied or **hardlinked** from existing files. Think of _hardlink_ as of _another name and path for the same file_. That means hardlinks cannot be used across different disks, and if you change content in one hardlink, it will stay changed in another. But they take about zero space. Since on Windows you have to be admin or enable Developer Mode (Win10 only), this **option is disabled by default**. To enable it, add `make_hardlinks = true` to `[Settings]` and be sure either Developer Mode is enabled or that the app runs with admin privilege.
+- **Duplicates** are not downloaded again, they either copied or **hardlinked** from existing files. Think of _hardlink_ as of _another name and path for the same file_. That means hardlinks cannot be used across different disks, and if you change content in one hardlink, it will stay changed in another. But they take about zero space. It should work on the most setups, but just in case this **option is disabled by default**. To enable it, add `make_hardlinks = true` to `[Settings]` and be sure either Developer Mode is enabled or that the app runs with admin privilege. **Try it if you have a lot of duplicates or if you enable a cache.**
 - If you need to stop e621dl, or there was some random error, it will continue search and download right were it stopped. On Windows, you can just close console window. Same for Linux consoles. More specifically for `SIGHUP`,`SIGINT` and `SIGTERM` signals.
 - You can use **advanced boolean conditions** for further filtering.
 - You can cache all files downloaded before to cache folder. This is **not** default behavior.
 - You can store all posts info from API to local database. This is also **not** default behavior.
 - You can use said database as source of file link and filtered data instead of API. Combined with cache and deduplication, you can recreate downloads folder at any time with different filters. One limitation is you cannot use metatags with database search.
-- You can use one API or DB prefilter to iterate over posts, with other searches using prefiltered results. Limitation is you cannot use metatags anywhere except for prefilter.
+- You can use **prefilters** to iterate over posts, with other searches using prefiltered results. Limitation is you cannot use metatags anywhere except for prefilters. Since latest update, you can use `pool` metatag with id of a pool. **Option can be useful if you have 10+ large folders to update**.
 - [**Cloudflare captcha support**](Cloudflare.md) Note: this is not captcha bypass, you're still need to solve it in a browser with special addon, launched from the same IP address with e621dl.
 - **Improved connection stability**. You can plug and unplug network cable and e621dl will continue as if nothing happened.
 - Max downloaded files per section limit. You can download only, say, 100 last files.
 - **`order:` metatag family support**. With max downloads limit you can get e.g. top 10 most rated or top 25 least favorite.
-- **Multithreaded**. 
+- **Multithreaded**. Files will be downloaded in parallel with getting links to them from the API.
 - **Folder pruning**. All files that are no longer required can be removed on next run. This is **not** a default behavior.
 - Easy post blacklisting. Just move files you don't wanna see again to a special folder, and you won't. The files will also be removed from the folder.
 - **Authorization via e621 API key**.
 - Option to not redownload deleted files
+- Option to put files in pools to a separate subfolders
 
 # Installing and Running **e621dl**
 ## from a Windows executable
@@ -52,7 +54,7 @@ Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManage
 
 And confirm everything if needed. This installs chocolatey.
 
-3. Paste this and press Enter in the same or a new console:
+3. Paste this and press Enter in a new Admin console:
 
 ```
 choco install python
@@ -63,18 +65,12 @@ And also confirm everything. Obviously, this installs python. If it  doesn't wor
 4. Paste this and press Enter in the same or a new console:
 
 ```
-pip install requests colorama natsort brotli
+pip install requests colorama natsort brotli atomicwrites
 ```
 
 This installs all required dependencies
 
 5. [Download source](https://github.com/Wulfre/e621dl/archive/master.zip) and unpack it to a folder, then doubleclick `e621_noclose_py.bat`
-
-## For Windows 10 users
-
-If you want to use hardlinks without admin rights, you can enable "Developer mode" this way
-
-Settings > Update & Security > For Developers and select "Developer mode". Details about Developer Mode can be found [here](https://www.howtogeek.com/292914/what-is-developer-mode-in-windows-10/).
 
 ## First Run
 
@@ -114,6 +110,7 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;prune_cache = true
 ;login = your e621 login
 ;api_key = your e621 api key generated in account settings
+;no_redownload = true
 
 ;These are default settings for all search groups below
 ;[Defaults]
@@ -124,6 +121,8 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ;max_downloads = inf
 ;post_from = api ;db is for saved database
 ;format = 
+;pool_post_strategy = move
+;pool_post_strategy = copy
 
 ;This is a special prefiltration section.
 ;If it exists, all subsequent search groups
@@ -168,6 +167,7 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; blacklisted = tag_blocked another_blocked
 ; post_source = api 
 ; ;post_source = db
+
 
 
 ; comma as separator is optional
@@ -272,11 +272,23 @@ Create sections in the `config.ini` to specify which posts you would like to dow
 ; [cat_with_subfolder]
 ; tags = cat
 ; subfolders = wide_eyed_subcat
+; 
+; This option makes subfolders 
+; pools/<pool id>
+; pools/<another pool id>
+; and moves all images/videos there.
+; You can use
+; pool_post_strategy = copy
+; to copy there instead of moving
+; Example:
+; [pooled_cat]
+; tags = cat
+; pool_post_strategy = move
 ```
 
-The following characters are not allowed in search group names: `:`,  `?`, `"`, `<`, `>`, `|`, as they can cause issues in windows file directories. If any of these characters are used, they will be replaced with the `_` character.
+The following characters are not allowed in search group names: `:`,  `?`, `"`, `<`, `>`, `|`, as they can cause issues in windows file directories. If any of these characters are used, they will be replaced with the closest-looking characters.
 
-`*` Can be used at the start of a group name to disable its downloading. Useful to skip group for one time and to create subcategory. If an asterisk is in any other part of a group name, it is replaced with `_` in the folder name. Note: you cannot disable `prefilter` section with `*`.
+`*` Can be used at the start of a group name to disable its downloading. Useful to skip group for one time and to create subcategory. If an asterisk is in any other part of a group name, it is replaced with `❋` in the folder name. Note: you cannot disable `prefilter` section with `*`.
 
 These characters are folder separators: `\` `/`. Use them to create subfolders inside a folder inside `downloads`, for e.g. collection sorting.
 
@@ -301,6 +313,7 @@ One side effect of the workaround used to search an unlimited number tags is tha
 | format                       | see below                           | Allows to format filename beside id.extension. See below for details |
 | subfolders                   | search group names, space separated | all posts that correspond to searches in the subfolder and to current search are placed in the subfolder and not in main folder. See below for details |
 | blacklist_default_subfolders | true/false                          | if true, subfolders from `Defaults` won't be appended to this section's `subfolders` |
+| pool_post_strategy           | move/copy                           | Separation of post by pools strategy. See *Separation by pools and pools download* for details |
 
 ### Conditions
 
@@ -331,7 +344,7 @@ This means that if there is tag "sad" in post, condition is not fulfilled. Other
 
 ### Database as a source of filenames
 
-By default, all posts' info are stored in local database. So, if `post_source` set to `db`, all info, e.g. rating, creation date or link to file will be from there, not from e621 api. In combination with local file cache, this can be used to recreate folders with new filtering, more strict or more relaxed. `api` is default, but this can be overwritten in `Defaults` section.
+By default, all posts' info are stored in a local database. So, if `post_source` set to `db`, all info, e.g. rating, creation date or link to file will be from there, not from e621 api. In combination with local file cache, this can be used to recreate folders with new filtering, more strict or more relaxed. `api` is default, but this can be overwritten in `Defaults` section.
 
 ### Format of filenames
 
@@ -558,7 +571,7 @@ Downloads
         |-- Unknows_Artist
 ```
 
-If have some issue with that, post it [here]( https://github.com/lurkbbs/e621dl/issues ). If not, I'll leave it like this for now.
+If have some issue or troubles with how to use that, post it [here]( https://github.com/lurkbbs/e621dl/issues ), or contact me via lurkbbs@gmail.com or send me a message on e621.net, my username is lurkbbs. If not, I'll leave it like this for now.
 
 Also, you can make a subcategory inside of another subcategory. And you can make an empty subcategory, like this
 
@@ -628,7 +641,161 @@ Downloads
 
 
 
+Finally, there is an option to disable creating default subcategories,  `blacklist_default_subfolders`. Example:
 
+```ini
+[Defaults]
+days = 100
+ratings = s
+format = {artist}
+subfolders = Unknows_Artist Dragons
+
+;;;;;;;;;;;;;;;;;;;
+;; SEARCH GROUPS ;;
+;;;;;;;;;;;;;;;;;;;
+
+; For now, there should be no spaces in
+; subcategory name
+[*Unknows_Artist]
+tag = unknown_artist
+
+[*Dragons]
+tag = dragon
+
+[Cats]
+tags = cat
+
+[Wolves]
+tags = wolf
+blacklist_default_subfolders = true
+subfolders = Dragons
+```
+
+Turn into this:
+
+```
+Downloads
+|
+|-- Cats
+|   |
+|   |-- Unknows_Artist
+|   |    |
+|   |    |-- Dragons
+|   |
+|   |-- Dragons
+|       |
+|       |-- Unknows_Artist
+|
+|-- Wolves
+    |
+    |-- Dragons
+```
+
+
+
+### Separation by pools and pools download
+
+E621dl provides to options to work with pools. First is separation by pools
+
+For every download section and for `Defaults`, there is an option `pool_post_strategy` that can be either `move` or `copy`.
+
+For example, for this section folders will be like that
+
+```ini
+[Cats]
+tags = cat
+pool_post_strategy = move
+```
+
+Folders would be:
+
+```
+Downloads
+|
+|-- Cats
+    |
+    |-- pools
+        |
+        |-- <id 1>
+        |
+        |-- <id 2>
+        |
+        ...
+```
+
+`move` places all files that are in pools only in `pools` folders, `copy` copies them there (who knew, yeah).
+
+Next, for every folder with pools, there is a way to download remaining pools with less restrictive filtering.
+
+in `[Settings]`, just add `pool_download_generate = true`, like that:
+
+```ini
+[Settings]
+; ...
+pool_download_generate = true
+```
+
+On first run with the option enabled, pools.ini will be created in the folder with `e621dl.exe`/`e621dl.py`
+
+```ini
+;[Settings]
+;include_md5 = false
+;make_hardlinks = true
+;make_cache = true
+;prune_downloads = true
+;prune_cache = true
+;login = your e621 login
+;api_key = your e621 api key generated in account settings
+
+[Defaults]
+days = 365000
+min_score = -2147483647
+min_favs = 0
+ratings = s q e
+;format = 
+```
+
+Change it as you see fit and rerun e621dl. After processing all of your configs, `pools.generated` will be created, looking like this
+
+```ini
+;[Settings]
+;include_md5 = false
+;make_hardlinks = true
+;make_cache = true
+;prune_downloads = true
+;prune_cache = true
+;login = your e621 login
+;api_key = your e621 api key generated in account settings
+
+[Defaults]
+days = 365000
+min_score = -2147483647
+min_favs = 0
+ratings = s q e
+;format = 
+
+[<prefilter_1>]
+tags = pool:<some id>
+
+[<prefilter_2>]
+tags = pool:<some other id>
+
+[folder_of_origin/pools/<some_id>]
+tags = pool:<some id>
+
+[next_folder_of_origin/pools/<some_id>]
+tags = pool:<some id>
+
+[yet_another_folder_of_origin/pools/<some other id>]
+tags = pool:<some other id>
+
+; ...
+
+```
+
+And then processed just like regular config.
+
+Pools will be generated only for folders with `pool_post_strategy` enabled.
 
 ## Section [Defaults]
 
@@ -649,20 +816,21 @@ This section have only one option, `tags`, an essentially every tags from here a
 
 ## Section [Settings]
 
-Settings for e621dl. All settings are boolean values that accept `true` or `false`.
+Settings for e621dl. All settings except for `login` and `api_key` are boolean values that accept `true` or `false`.
 
-| Name            | Description                                                  |
-| --------------- | ------------------------------------------------------------ |
-| include_md5     | Changed in e621dl 5.4.0. If `true`, and format field in [defaults] is not set, default format became id.md5.id.ext instead of id.ext. This way you can deduplicate files and see md5 in a filename |
-| make_hardlinks  | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
-| make_cache      | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
-| db              | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
-| offline         | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, it won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. This option must be enabled in all configs to work properly. |
-| prune_downloads | If `true` in at least one of config files, all files in `downloads` that do not meet any of search criteria will be removed after all configs are processed. It's as if you removed everything and then download only what you need. This option will be true for every configs if set to true in at leas one of them. |
-| prune_cache     | If you have a cache folder and if `true` in at least one of config files , than any files that has not a single copy/hardlink in `downloads ` will be deleted after all configs are processed. It's as if we manually removed all files in the cache and then copied it from downloads. This option will be true for every configs if set to true in at leas one of them. |
-| login           | Your e621 login                                              |
-| api_key         | Your API key, generated in "Account" > "Manage API Access"   |
-| no_redownload   | Blocks e621dl from redownloading files from a folder if they were deleted from there. This option will be true for every configs if set to true in at leas one of them. |
+| Name                   | Description                                                  |
+| ---------------------- | ------------------------------------------------------------ |
+| include_md5            | Changed in e621dl 5.4.0. If `true`, and format field in [defaults] is not set, default format became id.md5.id.ext instead of id.ext. This way you can deduplicate files and see md5 in a filename |
+| make_hardlinks         | If `true`, if a file was already downloaded somewhere else, hardlink will be created. Otherwise, full copy of a file will be created. |
+| make_cache             | If `true`, every downloaded file will be hardlinked/copied to `cache` folder. |
+| db                     | If `true`, every post info will be stored in local database. If it's false, but database already is created, it can be used as a post info source, but no entries will be updated/created. |
+| offline                | If `true`, no requests whatsoever will be sent to e621. Tag aliasing is skipped, so if you use `cat` instead of `domestic_cat` and so on, you get incorrect result. Art description will be taken from local database (you have to have one, just use `db=true` at least once). If some files are not in cache or other folders, they won't be downloaded. You can use it to fast recreate folder structure. If you want to just download new section without stopping for one second every 320 art infos, you can use `post_source = db` in default section. Info will be acquired from local database, but tags will be checked and files will be downloaded. This option must be enabled in all configs to work properly. |
+| prune_downloads        | If `true` in at least one of config files, all files in `downloads` that do not meet any of search criteria will be removed after all configs are processed. It's as if you removed everything and then download only what you need. This option will be true for every configs if set to true in at leas one of them. |
+| prune_cache            | If you have a cache folder and if `true` in at least one of config files , than any files that has not a single copy/hardlink in `downloads ` will be deleted after all configs are processed. It's as if we manually removed all files in the cache and then copied it from downloads. This option will be true for every configs if set to true in at leas one of them. |
+| login                  | Your e621 login                                              |
+| api_key                | Your API key, generated in "Account" > "Manage API Access"   |
+| no_redownload          | Blocks e621dl from redownloading files from a folder if they were deleted from there. This option will be true for every configs if set to true in at leas one of them. |
+| pool_download_generate | Generate config for download of pools. See *Separation by pools and pools download* for details |
 
 
 
