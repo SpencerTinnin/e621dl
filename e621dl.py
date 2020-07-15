@@ -743,11 +743,13 @@ def process_config(filename, session, pathes_storage, files, all_time_downloaded
                     if make_pooled_subfolder and poolless_unfiltered_directories:
                         pools = get_pools(post)
                         for pool in pools:
+                            pooled_unfiltered_directories_per_pool=[]
                             for dir in poolless_unfiltered_directories:
                                 pooled_unfiltered_directories.append(f"{dir}/pools/{pool}")
+                                pooled_unfiltered_directories_per_pool.append(f"{dir}/pools/{pool}")
 
                             if pool_download_generate:
-                                pools_folders.setdefault(pool,[]).extend(pooled_unfiltered_directories)
+                                pools_folders.setdefault(pool,[]).extend(pooled_unfiltered_directories_per_pool)
                             
                     if make_pooled_subfolder and pooled_unfiltered_directories:
                         if move_pooled:
